@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PenDonn - Automated Penetration Testing</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 2px solid rgba(255,255,255,0.2);
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 3em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            color: #a8d0ff;
+            margin-top: 10px;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(255,255,255,0.2);
+            transition: transform 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #4affff;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #a8d0ff;
+            margin-top: 10px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            background: rgba(255,255,255,0.1);
+            padding: 12px 25px;
+            border-radius: 10px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        .tab.active {
+            background: rgba(74,255,255,0.2);
+            border-color: #4affff;
+        }
+
+        .content-panel {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            border: 1px solid rgba(255,255,255,0.2);
+            display: none;
+        }
+
+        .content-panel.active {
+            display: block;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        th {
+            background: rgba(255,255,255,0.1);
+            font-weight: bold;
+        }
+
+        tr:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #4affff 0%, #35d4d4 100%);
+            color: #1e3c72;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+
+        .btn:hover {
+            transform: scale(1.05);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ff4a4a 0%, #d43535 100%);
+            color: #fff;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+
+        .badge-success {
+            background: #4affaa;
+            color: #1e3c72;
+        }
+
+        .badge-warning {
+            background: #ffaa4a;
+            color: #1e3c72;
+        }
+
+        .badge-danger {
+            background: #ff4a4a;
+            color: #fff;
+        }
+
+        .badge-info {
+            background: #4a9aff;
+            color: #fff;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-running {
+            background: #4affaa;
+            box-shadow: 0 0 10px #4affaa;
+        }
+
+        .status-stopped {
+            background: #ff4a4a;
+        }
+
+        .whitelist-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .whitelist-form input {
+            flex: 1;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+
+        .whitelist-form input::placeholder {
+            color: rgba(255,255,255,0.5);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+            color: #a8d0ff;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #a8d0ff;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2em;
+            }
+
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔒 PenDonn</h1>
+            <p class="subtitle">Automated Penetration Testing System</p>
+        </header>
+
+        <div class="dashboard" id="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-networks">-</div>
+                <div class="stat-label">Networks Discovered</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-handshakes">-</div>
+                <div class="stat-label">Handshakes Captured</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-passwords">-</div>
+                <div class="stat-label">Passwords Cracked</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-vulns">-</div>
+                <div class="stat-label">Vulnerabilities Found</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="btn" onclick="refreshData()">🔄 Refresh</button>
+            <button class="btn" onclick="exportData()">💾 Export Data</button>
+            <button class="btn btn-danger" onclick="resetDatabase()">⚠️ Reset Database</button>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('networks')">Networks</div>
+            <div class="tab" onclick="switchTab('handshakes')">Handshakes</div>
+            <div class="tab" onclick="switchTab('passwords')">Passwords</div>
+            <div class="tab" onclick="switchTab('scans')">Scans</div>
+            <div class="tab" onclick="switchTab('vulnerabilities')">Vulnerabilities</div>
+            <div class="tab" onclick="switchTab('whitelist')">Whitelist</div>
+        </div>
+
+        <div id="networks-panel" class="content-panel active">
+            <h2>Discovered Networks</h2>
+            <div id="networks-content" class="loading">Loading...</div>
+        </div>
+
+        <div id="handshakes-panel" class="content-panel">
+            <h2>Captured Handshakes</h2>
+            <div id="handshakes-content" class="loading">Loading...</div>
+        </div>
+
+        <div id="passwords-panel" class="content-panel">
+            <h2>Cracked Passwords</h2>
+            <div id="passwords-content" class="loading">Loading...</div>
+        </div>
+
+        <div id="scans-panel" class="content-panel">
+            <h2>Network Scans</h2>
+            <div id="scans-content" class="loading">Loading...</div>
+        </div>
+
+        <div id="vulnerabilities-panel" class="content-panel">
+            <h2>Discovered Vulnerabilities</h2>
+            <div id="vulnerabilities-content" class="loading">Loading...</div>
+        </div>
+
+        <div id="whitelist-panel" class="content-panel">
+            <h2>SSID Whitelist</h2>
+            <div class="whitelist-form">
+                <input type="text" id="whitelist-input" placeholder="Enter SSID to whitelist...">
+                <button class="btn" onclick="addToWhitelist()">Add to Whitelist</button>
+            </div>
+            <div id="whitelist-content" class="loading">Loading...</div>
+        </div>
+    </div>
+
+    <script>
+        let currentTab = 'networks';
+
+        function switchTab(tab) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Update panels
+            document.querySelectorAll('.content-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(`${tab}-panel`).classList.add('active');
+
+            currentTab = tab;
+            loadTabData(tab);
+        }
+
+        function loadTabData(tab) {
+            switch(tab) {
+                case 'networks': loadNetworks(); break;
+                case 'handshakes': loadHandshakes(); break;
+                case 'passwords': loadPasswords(); break;
+                case 'scans': loadScans(); break;
+                case 'vulnerabilities': loadVulnerabilities(); break;
+                case 'whitelist': loadWhitelist(); break;
+            }
+        }
+
+        async function loadStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const stats = data.status.statistics;
+                    document.getElementById('stat-networks').textContent = stats.networks_discovered;
+                    document.getElementById('stat-handshakes').textContent = stats.handshakes_captured;
+                    document.getElementById('stat-passwords').textContent = stats.passwords_cracked;
+                    document.getElementById('stat-vulns').textContent = stats.vulnerabilities_found;
+                }
+            } catch (error) {
+                console.error('Error loading status:', error);
+            }
+        }
+
+        async function loadNetworks() {
+            const content = document.getElementById('networks-content');
+            try {
+                const response = await fetch('/api/networks');
+                const data = await response.json();
+                
+                if (data.success && data.networks.length > 0) {
+                    let html = '<table><thead><tr><th>SSID</th><th>BSSID</th><th>Channel</th><th>Encryption</th><th>Signal</th><th>Last Seen</th><th>Whitelisted</th></tr></thead><tbody>';
+                    
+                    data.networks.forEach(net => {
+                        const whitelistBadge = net.is_whitelisted ? 
+                            '<span class="badge badge-info">Yes</span>' : 
+                            '<span class="badge">No</span>';
+                        
+                        html += `<tr>
+                            <td><strong>${net.ssid}</strong></td>
+                            <td>${net.bssid}</td>
+                            <td>${net.channel}</td>
+                            <td>${net.encryption}</td>
+                            <td>${net.signal_strength} dBm</td>
+                            <td>${new Date(net.last_seen).toLocaleString()}</td>
+                            <td>${whitelistBadge}</td>
+                        </tr>`;
+                    });
+                    
+                    html += '</tbody></table>';
+                    content.innerHTML = html;
+                } else {
+                    content.innerHTML = '<div class="empty-state">No networks discovered yet</div>';
+                }
+            } catch (error) {
+                content.innerHTML = '<div class="empty-state">Error loading networks</div>';
+                console.error('Error:', error);
+            }
+        }
+
+        async function loadHandshakes() {
+            const content = document.getElementById('handshakes-content');
+            try {
+                const response = await fetch('/api/handshakes');
+                const data = await response.json();
+                
+                if (data.success && data.handshakes.length > 0) {
+                    let html = '<table><thead><tr><th>SSID</th><th>BSSID</th><th>Captured</th><th>Status</th><th>Quality</th></tr></thead><tbody>';
+                    
+                    data.handshakes.forEach(hs => {
+                        let statusBadge = '';
+                        if (hs.status === 'cracked') statusBadge = '<span class="badge badge-success">Cracked</span>';
+                        else if (hs.status === 'cracking') statusBadge = '<span class="badge badge-warning">Cracking</span>';
+                        else if (hs.status === 'pending') statusBadge = '<span class="badge badge-info">Pending</span>';
+                        else statusBadge = '<span class="badge badge-danger">Failed</span>';
+                        
+                        html += `<tr>
+                            <td><strong>${hs.ssid}</strong></td>
+                            <td>${hs.bssid}</td>
+                            <td>${new Date(hs.capture_date).toLocaleString()}</td>
+                            <td>${statusBadge}</td>
+                            <td>${hs.quality}</td>
+                        </tr>`;
+                    });
+                    
+                    html += '</tbody></table>';
+                    content.innerHTML = html;
+                } else {
+                    content.innerHTML = '<div class="empty-state">No handshakes captured yet</div>';
+                }
+            } catch (error) {
+                content.innerHTML = '<div class="empty-state">Error loading handshakes</div>';
+                console.error('Error:', error);
+            }
+        }
+
+        async function loadPasswords() {
+            const content = document.getElementById('passwords-content');
+            try {
+                const response = await fetch('/api/passwords');
+                const data = await response.json();
+                
+                if (data.success && data.passwords.length > 0) {
+                    let html = '<table><thead><tr><th>SSID</th><th>BSSID</th><th>Password</th><th>Engine</th><th>Crack Time</th><th>Cracked</th></tr></thead><tbody>';
+                    
+                    data.passwords.forEach(pwd => {
+                        const crackTime = pwd.crack_time_seconds < 60 ? 
+                            `${pwd.crack_time_seconds}s` : 
+                            `${Math.floor(pwd.crack_time_seconds / 60)}m ${pwd.crack_time_seconds % 60}s`;
+                        
+                        html += `<tr>
+                            <td><strong>${pwd.ssid}</strong></td>
+                            <td>${pwd.bssid}</td>
+                            <td><code style="background: rgba(255,255,255,0.1); padding: 4px 8px; border-radius: 4px;">${pwd.password}</code></td>
+                            <td>${pwd.cracking_engine}</td>
+                            <td>${crackTime}</td>
+                            <td>${new Date(pwd.cracked_date).toLocaleString()}</td>
+                        </tr>`;
+                    });
+                    
+                    html += '</tbody></table>';
+                    content.innerHTML = html;
+                } else {
+                    content.innerHTML = '<div class="empty-state">No passwords cracked yet</div>';
+                }
+            } catch (error) {
+                content.innerHTML = '<div class="empty-state">Error loading passwords</div>';
+                console.error('Error:', error);
+            }
+        }
+
+        async function loadScans() {
+            const content = document.getElementById('scans-content');
+            try {
+                const response = await fetch('/api/scans');
+                const data = await response.json();
+                
+                if (data.success && data.scans.length > 0) {
+                    let html = '<table><thead><tr><th>SSID</th><th>Scan Type</th><th>Status</th><th>Vulnerabilities</th><th>Started</th></tr></thead><tbody>';
+                    
+                    data.scans.forEach(scan => {
+                        let statusBadge = '';
+                        if (scan.status === 'completed') statusBadge = '<span class="badge badge-success">Completed</span>';
+                        else if (scan.status === 'running') statusBadge = '<span class="badge badge-warning">Running</span>';
+                        else statusBadge = '<span class="badge badge-danger">Failed</span>';
+                        
+                        html += `<tr>
+                            <td><strong>${scan.ssid}</strong></td>
+                            <td>${scan.scan_type}</td>
+                            <td>${statusBadge}</td>
+                            <td><span class="badge badge-danger">${scan.vulnerabilities_found}</span></td>
+                            <td>${new Date(scan.start_time).toLocaleString()}</td>
+                        </tr>`;
+                    });
+                    
+                    html += '</tbody></table>';
+                    content.innerHTML = html;
+                } else {
+                    content.innerHTML = '<div class="empty-state">No scans performed yet</div>';
+                }
+            } catch (error) {
+                content.innerHTML = '<div class="empty-state">Error loading scans</div>';
+                console.error('Error:', error);
+            }
+        }
+
+        async function loadVulnerabilities() {
+            const content = document.getElementById('vulnerabilities-content');
+            try {
+                const response = await fetch('/api/vulnerabilities');
+                const data = await response.json();
+                
+                if (data.success && data.vulnerabilities.length > 0) {
+                    let html = '<table><thead><tr><th>Host</th><th>Port</th><th>Service</th><th>Type</th><th>Severity</th><th>Description</th><th>Plugin</th></tr></thead><tbody>';
+                    
+                    data.vulnerabilities.forEach(vuln => {
+                        let severityBadge = '';
+                        if (vuln.severity === 'critical') severityBadge = '<span class="badge badge-danger">Critical</span>';
+                        else if (vuln.severity === 'high') severityBadge = '<span class="badge badge-danger">High</span>';
+                        else if (vuln.severity === 'medium') severityBadge = '<span class="badge badge-warning">Medium</span>';
+                        else severityBadge = '<span class="badge badge-info">Low</span>';
+                        
+                        html += `<tr>
+                            <td><strong>${vuln.host}</strong></td>
+                            <td>${vuln.port || 'N/A'}</td>
+                            <td>${vuln.service || 'N/A'}</td>
+                            <td>${vuln.vulnerability_type}</td>
+                            <td>${severityBadge}</td>
+                            <td>${vuln.description}</td>
+                            <td>${vuln.plugin_name}</td>
+                        </tr>`;
+                    });
+                    
+                    html += '</tbody></table>';
+                    content.innerHTML = html;
+                } else {
+                    content.innerHTML = '<div class="empty-state">No vulnerabilities found yet</div>';
+                }
+            } catch (error) {
+                content.innerHTML = '<div class="empty-state">Error loading vulnerabilities</div>';
+                console.error('Error:', error);
+            }
+        }
+
+        async function loadWhitelist() {
+            const content = document.getElementById('whitelist-content');
+            try {
+                const response = await fetch('/api/whitelist');
+                const data = await response.json();
+                
+                if (data.success && data.whitelist.length > 0) {
+                    let html = '<table><thead><tr><th>SSID</th><th>Action</th></tr></thead><tbody>';
+                    
+                    data.whitelist.forEach(ssid => {
+                        html += `<tr>
+                            <td><strong>${ssid}</strong></td>
+                            <td><button class="btn btn-danger" onclick="removeFromWhitelist('${ssid}')">Remove</button></td>
+                        </tr>`;
+                    });
+                    
+                    html += '</tbody></table>';
+                    content.innerHTML = html;
+                } else {
+                    content.innerHTML = '<div class="empty-state">No SSIDs in whitelist</div>';
+                }
+            } catch (error) {
+                content.innerHTML = '<div class="empty-state">Error loading whitelist</div>';
+                console.error('Error:', error);
+            }
+        }
+
+        async function addToWhitelist() {
+            const input = document.getElementById('whitelist-input');
+            const ssid = input.value.trim();
+            
+            if (!ssid) {
+                alert('Please enter an SSID');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/whitelist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    input.value = '';
+                    loadWhitelist();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error adding to whitelist');
+                console.error('Error:', error);
+            }
+        }
+
+        async function removeFromWhitelist(ssid) {
+            if (!confirm(`Remove ${ssid} from whitelist?`)) return;
+            
+            try {
+                const response = await fetch(`/api/whitelist/${encodeURIComponent(ssid)}`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    loadWhitelist();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error removing from whitelist');
+                console.error('Error:', error);
+            }
+        }
+
+        async function exportData() {
+            try {
+                const response = await fetch('/api/export', { method: 'POST' });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `pendonn_export_${new Date().getTime()}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                } else {
+                    alert('Error exporting data');
+                }
+            } catch (error) {
+                alert('Error exporting data');
+                console.error('Error:', error);
+            }
+        }
+
+        async function resetDatabase() {
+            if (!confirm('Are you sure? This will delete all data (a backup will be created).')) return;
+            if (!confirm('FINAL WARNING: This action cannot be undone!')) return;
+            
+            try {
+                const response = await fetch('/api/database/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keep_backup: true })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('Database reset successfully');
+                    refreshData();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error resetting database');
+                console.error('Error:', error);
+            }
+        }
+
+        function refreshData() {
+            loadStatus();
+            loadTabData(currentTab);
+        }
+
+        // Initialize
+        loadStatus();
+        loadNetworks();
+
+        // Auto-refresh every 10 seconds
+        setInterval(refreshData, 10000);
+    </script>
+</body>
+</html>

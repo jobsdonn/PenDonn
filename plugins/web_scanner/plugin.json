@@ -1,0 +1,9 @@
+{
+  "name": "Web Vulnerability Scanner",
+  "version": "1.0.0",
+  "description": "Scans web servers for common vulnerabilities and misconfigurations",
+  "author": "PenDonn Team",
+  "enabled": true,
+  "module": "web_scanner.py",
+  "class": "WebScanner"
+}

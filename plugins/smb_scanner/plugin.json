@@ -1,0 +1,9 @@
+{
+  "name": "SMB Vulnerability Scanner",
+  "version": "1.0.0",
+  "description": "Scans for SMB vulnerabilities including SMBv1 and EternalBlue",
+  "author": "PenDonn Team",
+  "enabled": true,
+  "module": "smb_scanner.py",
+  "class": "SMBScanner"
+}

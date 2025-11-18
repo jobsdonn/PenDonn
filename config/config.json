@@ -1,0 +1,54 @@
+{
+  "system": {
+    "name": "PenDonn",
+    "version": "1.0.0",
+    "auto_start": true,
+    "log_level": "INFO"
+  },
+  "wifi": {
+    "monitor_interface": "wlan1",
+    "attack_interface": "wlan2",
+    "management_interface": "wlan0",
+    "channel_hop_interval": 2,
+    "handshake_timeout": 300
+  },
+  "whitelist": {
+    "ssids": []
+  },
+  "cracking": {
+    "enabled": true,
+    "engines": ["john", "hashcat"],
+    "wordlist_path": "/usr/share/wordlists/rockyou.txt",
+    "auto_start_cracking": true,
+    "max_concurrent_cracks": 2,
+    "john_format": "wpapsk",
+    "hashcat_mode": 22000
+  },
+  "enumeration": {
+    "enabled": true,
+    "auto_scan_on_crack": true,
+    "nmap_timing": "T4",
+    "port_scan_range": "1-10000",
+    "scan_timeout": 3600
+  },
+  "plugins": {
+    "enabled": true,
+    "directory": "./plugins",
+    "auto_load": true
+  },
+  "database": {
+    "path": "./data/pendonn.db",
+    "backup_on_export": true
+  },
+  "web": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "secret_key": "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION"
+  },
+  "display": {
+    "enabled": true,
+    "type": "waveshare_v4",
+    "refresh_interval": 2,
+    "brightness": 80
+  }
+}

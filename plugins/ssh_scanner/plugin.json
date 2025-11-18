@@ -1,0 +1,9 @@
+{
+  "name": "SSH Brute Force Scanner",
+  "version": "1.0.0",
+  "description": "Tests for weak SSH credentials and common misconfigurations",
+  "author": "PenDonn Team",
+  "enabled": true,
+  "module": "ssh_scanner.py",
+  "class": "SSHScanner"
+}

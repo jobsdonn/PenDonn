@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.db.backup.*
+
+# Logs
+logs/*.log
+*.log
+
+# Handshakes
+handshakes/*.cap
+handshakes/*.hc22000
+handshakes/*.john
+handshakes/*.hccap
+
+# Configuration (keep template, ignore actual config with secrets)
+config/config.json.local
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Exports
+export_*.json
+
+# System files
+.directory
+.Trash-*
