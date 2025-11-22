@@ -250,6 +250,8 @@ echo -e "1. Edit configuration: ${BLUE}sudo nano $INSTALL_DIR/config/config.json
 echo -e "2. Configure WiFi interfaces (wlan0, wlan1, wlan2)"
 echo -e "3. Add whitelisted SSIDs to avoid scanning"
 echo -e "4. Change the web interface secret key"
+echo -e "5. ${RED}IMPORTANT:${NC} Starting services will put WiFi in monitor mode"
+echo -e "   This will disconnect your SSH session!"
 echo ""
 echo -e "${YELLOW}Service Management:${NC}"
 echo -e "Start services:  ${BLUE}sudo systemctl start $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
@@ -257,24 +259,10 @@ echo -e "Stop services:   ${BLUE}sudo systemctl stop $SERVICE_NAME $WEB_SERVICE_
 echo -e "View logs:       ${BLUE}sudo journalctl -u $SERVICE_NAME -f${NC}"
 echo -e "Web interface:   ${BLUE}http://<raspberry-pi-ip>:8080${NC}"
 echo ""
-echo -e "${GREEN}Starting services now...${NC}"
-systemctl start ${SERVICE_NAME}.service
-systemctl start ${WEB_SERVICE_NAME}.service
-
-sleep 2
-
-if systemctl is-active --quiet ${SERVICE_NAME}.service; then
-    print_success "PenDonn daemon is running"
-else
-    print_error "PenDonn daemon failed to start. Check logs: journalctl -u $SERVICE_NAME"
-fi
-
-if systemctl is-active --quiet ${WEB_SERVICE_NAME}.service; then
-    print_success "Web interface is running"
-else
-    print_error "Web interface failed to start. Check logs: journalctl -u $WEB_SERVICE_NAME"
-fi
-
+echo -e "${YELLOW}⚠️  IMPORTANT: Services are NOT started automatically${NC}"
+echo -e "${YELLOW}   This prevents disconnecting your SSH session during install.${NC}"
+echo -e "${YELLOW}   When ready, start services manually:${NC}"
+echo -e "   ${BLUE}sudo systemctl start $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
 echo ""
-echo -e "${GREEN}Happy (legal) hacking! 🔒${NC}"
+echo -e "${GREEN}Installation complete! Configure before starting services.${NC}"
 echo ""
