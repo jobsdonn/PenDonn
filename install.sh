@@ -88,6 +88,15 @@ print_success "System packages updated"
 # Install system dependencies
 print_status "Installing system dependencies (this may take several minutes)..."
 echo -e "${YELLOW}Note: You'll see the actual apt-get output below${NC}"
+
+# Try to install kernel headers (package name varies by OS version)
+KERNEL_HEADERS="linux-headers-$(uname -r)"
+if ! apt-cache show raspberrypi-kernel-headers > /dev/null 2>&1; then
+    echo -e "${YELLOW}Note: Using $KERNEL_HEADERS (raspberrypi-kernel-headers not available)${NC}"
+else
+    KERNEL_HEADERS="raspberrypi-kernel-headers"
+fi
+
 apt-get install -y \
     python3 \
     python3-pip \
@@ -101,8 +110,6 @@ apt-get install -y \
     net-tools \
     iw \
     macchanger \
-    hcxtools \
-    hcxdumptool \
     git \
     sqlite3 \
     hostapd \
@@ -110,9 +117,41 @@ apt-get install -y \
     nginx \
     build-essential \
     dkms \
-    linux-headers-$(uname -r) \
-    bc \
-    raspberrypi-kernel-headers
+    $KERNEL_HEADERS \
+    bc || {
+        # If some packages fail, try without optional ones
+        echo -e "${YELLOW}Some packages unavailable, trying without hcxtools/hcxdumptool...${NC}"
+        apt-get install -y \
+            python3 \
+            python3-pip \
+            python3-venv \
+            aircrack-ng \
+            john \
+            hashcat \
+            nmap \
+            tcpdump \
+            wireless-tools \
+            net-tools \
+            iw \
+            macchanger \
+            git \
+            sqlite3 \
+            hostapd \
+            dnsmasq \
+            nginx \
+            build-essential \
+            dkms \
+            $KERNEL_HEADERS \
+            bc
+    }
+
+# Try to install hcxtools/hcxdumptool separately (may not be available in all repos)
+if apt-cache show hcxtools > /dev/null 2>&1; then
+    apt-get install -y hcxtools hcxdumptool || print_warning "hcxtools/hcxdumptool not available"
+else
+    print_warning "hcxtools/hcxdumptool not available in repositories (optional)"
+fi
+
 print_success "System dependencies installed"
 
 # Install WiFi adapter drivers

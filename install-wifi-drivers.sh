@@ -58,7 +58,14 @@ echo ""
 # Install build dependencies
 print_status "Installing build dependencies..."
 apt-get update -qq
-apt-get install -y build-essential dkms linux-headers-$(uname -r) bc git raspberrypi-kernel-headers 2>&1 | grep -v "^Selecting\|^Preparing\|^Unpacking\|^Setting up\|^Processing"
+
+# Detect correct kernel headers package
+KERNEL_HEADERS="linux-headers-$(uname -r)"
+if apt-cache show raspberrypi-kernel-headers > /dev/null 2>&1; then
+    KERNEL_HEADERS="raspberrypi-kernel-headers"
+fi
+
+apt-get install -y build-essential dkms $KERNEL_HEADERS bc git 2>&1 | grep -v "^Selecting\|^Preparing\|^Unpacking\|^Setting up\|^Processing"
 print_success "Build dependencies installed"
 
 echo ""
