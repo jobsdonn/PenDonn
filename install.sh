@@ -101,6 +101,7 @@ apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
+    rsync \
     aircrack-ng \
     john \
     hashcat \
@@ -125,6 +126,7 @@ apt-get install -y \
             python3 \
             python3-pip \
             python3-venv \
+            rsync \
             aircrack-ng \
             john \
             hashcat \
@@ -154,9 +156,22 @@ fi
 
 print_success "System dependencies installed"
 
-# Install WiFi adapter drivers
-print_status "Installing WiFi adapter drivers (this may take 10-15 minutes)..."
-echo -e "${YELLOW}Installing drivers for popular pentesting WiFi adapters...${NC}"
+# Ask about WiFi driver installation
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}WiFi Driver Installation${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo "WiFi adapter drivers take 10-15 minutes to compile."
+echo "You can:"
+echo "  1. Install now (recommended for first-time setup)"
+echo "  2. Skip and install later with: sudo ./install-wifi-drivers.sh"
+echo ""
+read -p "Install WiFi drivers now? [y/N]: " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    # Install WiFi adapter drivers
+    print_status "Installing WiFi adapter drivers (this may take 10-15 minutes)..."
+    echo -e "${YELLOW}Installing drivers for popular pentesting WiFi adapters...${NC}"
 
 # Realtek RTL8188EU/RTL8188EUS (TP-Link TL-WN722N v2/v3, many cheap adapters)
 if ! lsmod | grep -q 8188eu; then
@@ -219,7 +234,11 @@ else
     echo -e "${GREEN}MT7612U driver already present${NC}"
 fi
 
-print_success "WiFi adapter drivers installed"
+    print_success "WiFi adapter drivers installed"
+else
+    echo -e "${YELLOW}Skipping WiFi driver installation${NC}"
+    echo -e "${BLUE}You can install them later with: ${GREEN}sudo ./install-wifi-drivers.sh${NC}"
+fi
 
 # Create installation directory
 print_status "Creating installation directory..."
@@ -236,15 +255,33 @@ print_status "Copying application files..."
 # Get the script's directory
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
+
 # Copy files excluding .venv, .git, and __pycache__
-rsync -av --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' ./ "$INSTALL_DIR/"
+echo -e "${BLUE}Source directory: $SCRIPT_DIR${NC}"
+echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
+
+if command -v rsync &> /dev/null; then
+    rsync -av --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' ./ "$INSTALL_DIR/"
+else
+    # Fallback to cp if rsync not available
+    print_warning "rsync not found, using cp (this is less reliable)"
+    find . -type f -not -path './.venv/*' -not -path './venv/*' -not -path './.git/*' -not -path '*/__pycache__/*' -not -name '*.pyc' -exec cp --parents {} "$INSTALL_DIR/" \;
+fi
+
 print_success "Files copied"
+
+# List what was copied (for debugging)
+echo -e "${BLUE}Verifying copied files:${NC}"
+ls -la "$INSTALL_DIR/" | head -20
 
 # Verify requirements.txt exists
 if [ ! -f "$INSTALL_DIR/requirements.txt" ]; then
     print_error "requirements.txt not found after copy!"
+    print_error "Files in $INSTALL_DIR:"
+    ls -la "$INSTALL_DIR/"
     exit 1
 fi
+print_success "requirements.txt found"
 
 # Create Python virtual environment
 print_status "Setting up Python virtual environment..."
