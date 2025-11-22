@@ -287,20 +287,184 @@ systemctl enable ${SERVICE_NAME}.service
 systemctl enable ${WEB_SERVICE_NAME}.service
 print_success "Services enabled"
 
-# Configure WiFi interfaces
+# Interactive Configuration Wizard
+echo ""
+echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║              Configuration Wizard                              ║${NC}"
+echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+# Detect WiFi interfaces
 print_status "Detecting WiFi interfaces..."
-INTERFACES=$(iw dev | grep Interface | awk '{print $2}')
-INTERFACE_COUNT=$(echo "$INTERFACES" | wc -l)
+INTERFACES=($(iw dev 2>/dev/null | grep Interface | awk '{print $2}'))
+INTERFACE_COUNT=${#INTERFACES[@]}
 
 echo -e "${YELLOW}Detected WiFi interfaces:${NC}"
-echo "$INTERFACES" | nl
+for i in "${!INTERFACES[@]}"; do
+    echo "  $((i+1)). ${INTERFACES[$i]}"
+done
+echo ""
 
 if [ "$INTERFACE_COUNT" -lt 3 ]; then
-    print_warning "Less than 3 WiFi interfaces detected!"
-    print_warning "You need: 1 onboard WiFi + 2 external WiFi adapters"
-    print_warning "Please configure interfaces manually in $INSTALL_DIR/config/config.json"
+    print_warning "Only $INTERFACE_COUNT interface(s) detected!"
+    print_warning "Recommended: 1 onboard WiFi + 2 external WiFi adapters"
+    echo ""
+fi
+
+# Ask if user wants to configure now
+read -p "Would you like to configure PenDonn now? (yes/no): " CONFIGURE_NOW
+
+if [ "$CONFIGURE_NOW" = "yes" ]; then
+    echo ""
+    echo -e "${GREEN}Starting configuration wizard...${NC}"
+    echo ""
+    
+    CONFIG_FILE="$INSTALL_DIR/config/config.json"
+    
+    # WiFi Interface Configuration
+    echo -e "${BLUE}[1/5] WiFi Interface Configuration${NC}"
+    echo -e "${YELLOW}You need 3 WiFi interfaces:${NC}"
+    echo "  1. Management interface (keeps network/SSH working)"
+    echo "  2. Monitor interface (scans for networks)"
+    echo "  3. Attack interface (captures handshakes)"
+    echo ""
+    
+    if [ "$INTERFACE_COUNT" -ge 3 ]; then
+        echo -e "${YELLOW}Available interfaces:${NC}"
+        for i in "${!INTERFACES[@]}"; do
+            echo "  $((i+1)). ${INTERFACES[$i]}"
+        done
+        echo ""
+        
+        # Management interface
+        read -p "Select MANAGEMENT interface (1-$INTERFACE_COUNT) [1]: " MGMT_CHOICE
+        MGMT_CHOICE=${MGMT_CHOICE:-1}
+        MGMT_IFACE=${INTERFACES[$((MGMT_CHOICE-1))]}
+        
+        # Monitor interface
+        read -p "Select MONITOR interface (1-$INTERFACE_COUNT) [2]: " MON_CHOICE
+        MON_CHOICE=${MON_CHOICE:-2}
+        MON_IFACE=${INTERFACES[$((MON_CHOICE-1))]}
+        
+        # Attack interface
+        read -p "Select ATTACK interface (1-$INTERFACE_COUNT) [3]: " ATK_CHOICE
+        ATK_CHOICE=${ATK_CHOICE:-3}
+        ATK_IFACE=${INTERFACES[$((ATK_CHOICE-1))]}
+        
+        echo ""
+        echo -e "${GREEN}Selected interfaces:${NC}"
+        echo "  Management: $MGMT_IFACE (keeps SSH working)"
+        echo "  Monitor:    $MON_IFACE (scans networks)"
+        echo "  Attack:     $ATK_IFACE (captures handshakes)"
+        
+        # Update config file
+        sed -i "s/\"management_interface\": \"wlan0\"/\"management_interface\": \"$MGMT_IFACE\"/g" "$CONFIG_FILE"
+        sed -i "s/\"monitor_interface\": \"wlan1\"/\"monitor_interface\": \"$MON_IFACE\"/g" "$CONFIG_FILE"
+        sed -i "s/\"attack_interface\": \"wlan2\"/\"attack_interface\": \"$ATK_IFACE\"/g" "$CONFIG_FILE"
+    else
+        print_warning "Not enough interfaces for auto-configuration"
+        echo "You'll need to edit config manually later"
+    fi
+    
+    echo ""
+    
+    # Whitelist Configuration
+    echo -e "${BLUE}[2/5] Whitelist Configuration${NC}"
+    echo -e "${YELLOW}Add SSIDs to avoid scanning (your home/work networks)${NC}"
+    echo ""
+    
+    WHITELIST_SSIDS=""
+    while true; do
+        read -p "Enter SSID to whitelist (or press Enter to skip): " SSID
+        if [ -z "$SSID" ]; then
+            break
+        fi
+        if [ -z "$WHITELIST_SSIDS" ]; then
+            WHITELIST_SSIDS="\"$SSID\""
+        else
+            WHITELIST_SSIDS="$WHITELIST_SSIDS, \"$SSID\""
+        fi
+        echo -e "${GREEN}Added: $SSID${NC}"
+    done
+    
+    if [ -n "$WHITELIST_SSIDS" ]; then
+        sed -i "s/\"ssids\": \[\]/\"ssids\": [$WHITELIST_SSIDS]/g" "$CONFIG_FILE"
+        echo -e "${GREEN}Whitelist configured${NC}"
+    else
+        echo -e "${YELLOW}No SSIDs whitelisted - will scan ALL networks${NC}"
+    fi
+    
+    echo ""
+    
+    # Web Interface Configuration
+    echo -e "${BLUE}[3/5] Web Interface Configuration${NC}"
+    read -p "Enter web interface port [8080]: " WEB_PORT
+    WEB_PORT=${WEB_PORT:-8080}
+    sed -i "s/\"port\": 8080/\"port\": $WEB_PORT/g" "$CONFIG_FILE"
+    
+    # Generate random secret key
+    SECRET_KEY=$(openssl rand -hex 32)
+    sed -i "s/\"secret_key\": \"CHANGE_THIS_SECRET_KEY_IN_PRODUCTION\"/\"secret_key\": \"$SECRET_KEY\"/g" "$CONFIG_FILE"
+    echo -e "${GREEN}Web interface configured on port $WEB_PORT${NC}"
+    echo -e "${GREEN}Random secret key generated${NC}"
+    
+    echo ""
+    
+    # Cracking Configuration
+    echo -e "${BLUE}[4/5] Password Cracking Configuration${NC}"
+    read -p "Enable auto-cracking after handshake capture? (yes/no) [yes]: " AUTO_CRACK
+    AUTO_CRACK=${AUTO_CRACK:-yes}
+    if [ "$AUTO_CRACK" = "no" ]; then
+        sed -i "s/\"auto_start_cracking\": true/\"auto_start_cracking\": false/g" "$CONFIG_FILE"
+        echo -e "${YELLOW}Auto-cracking disabled${NC}"
+    else
+        echo -e "${GREEN}Auto-cracking enabled${NC}"
+    fi
+    
+    echo ""
+    
+    # Display Configuration
+    echo -e "${BLUE}[5/5] Display Configuration${NC}"
+    read -p "Do you have a Waveshare display connected? (yes/no) [no]: " HAS_DISPLAY
+    HAS_DISPLAY=${HAS_DISPLAY:-no}
+    if [ "$HAS_DISPLAY" = "no" ]; then
+        sed -i "s/\"enabled\": true/\"enabled\": false/g" "$CONFIG_FILE"
+        echo -e "${YELLOW}Display disabled (headless mode)${NC}"
+    else
+        echo -e "${GREEN}Display enabled${NC}"
+    fi
+    
+    echo ""
+    echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║          Configuration completed successfully!                ║${NC}"
+    echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # Show configuration summary
+    echo -e "${BLUE}Configuration Summary:${NC}"
+    echo "  WiFi Interfaces:"
+    if [ -n "$MGMT_IFACE" ]; then
+        echo "    - Management: $MGMT_IFACE"
+        echo "    - Monitor: $MON_IFACE"
+        echo "    - Attack: $ATK_IFACE"
+    else
+        echo "    - Manual configuration needed"
+    fi
+    echo "  Web Interface: http://<raspberry-pi-ip>:$WEB_PORT"
+    if [ -n "$WHITELIST_SSIDS" ]; then
+        echo "  Whitelisted SSIDs: Yes"
+    else
+        echo "  Whitelisted SSIDs: None"
+    fi
+    echo "  Auto-cracking: $AUTO_CRACK"
+    echo "  Display: $HAS_DISPLAY"
+    echo ""
+    
 else
-    print_success "Sufficient WiFi interfaces detected"
+    echo ""
+    print_warning "Skipping configuration wizard"
+    echo -e "${YELLOW}You'll need to manually edit: $INSTALL_DIR/config/config.json${NC}"
+    echo ""
 fi
 
 # Installation complete
