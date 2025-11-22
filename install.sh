@@ -233,8 +233,18 @@ print_success "Directory structure created"
 
 # Copy files to installation directory
 print_status "Copying application files..."
-cp -r "$(dirname "$0")"/* "$INSTALL_DIR/"
+# Get the script's directory
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+# Copy files excluding .venv, .git, and __pycache__
+rsync -av --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' ./ "$INSTALL_DIR/"
 print_success "Files copied"
+
+# Verify requirements.txt exists
+if [ ! -f "$INSTALL_DIR/requirements.txt" ]; then
+    print_error "requirements.txt not found after copy!"
+    exit 1
+fi
 
 # Create Python virtual environment
 print_status "Setting up Python virtual environment..."
