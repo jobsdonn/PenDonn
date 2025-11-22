@@ -107,8 +107,80 @@ apt-get install -y \
     sqlite3 \
     hostapd \
     dnsmasq \
-    nginx
+    nginx \
+    build-essential \
+    dkms \
+    linux-headers-$(uname -r) \
+    bc \
+    raspberrypi-kernel-headers
 print_success "System dependencies installed"
+
+# Install WiFi adapter drivers
+print_status "Installing WiFi adapter drivers (this may take 10-15 minutes)..."
+echo -e "${YELLOW}Installing drivers for popular pentesting WiFi adapters...${NC}"
+
+# Realtek RTL8188EU/RTL8188EUS (TP-Link TL-WN722N v2/v3, many cheap adapters)
+if ! lsmod | grep -q 8188eu; then
+    echo -e "${BLUE}Installing RTL8188EU driver...${NC}"
+    cd /tmp
+    git clone https://github.com/aircrack-ng/rtl8188eus.git
+    cd rtl8188eus
+    make && make install
+    cd /tmp && rm -rf rtl8188eus
+    print_success "RTL8188EU driver installed"
+else
+    echo -e "${GREEN}RTL8188EU driver already present${NC}"
+fi
+
+# Realtek RTL8812AU/RTL8821AU (Alfa AWUS036ACH, AWUS036AC, many dual-band adapters)
+if ! lsmod | grep -q 8812au; then
+    echo -e "${BLUE}Installing RTL8812AU driver...${NC}"
+    cd /tmp
+    git clone https://github.com/aircrack-ng/rtl8812au.git
+    cd rtl8812au
+    make && make install
+    cd /tmp && rm -rf rtl8812au
+    print_success "RTL8812AU driver installed"
+else
+    echo -e "${GREEN}RTL8812AU driver already present${NC}"
+fi
+
+# Realtek RTL8814AU (Alfa AWUS1900, high-power adapters)
+if ! lsmod | grep -q 8814au; then
+    echo -e "${BLUE}Installing RTL8814AU driver...${NC}"
+    cd /tmp
+    git clone https://github.com/aircrack-ng/rtl8814au.git
+    cd rtl8814au
+    make && make install
+    cd /tmp && rm -rf rtl8814au
+    print_success "RTL8814AU driver installed"
+else
+    echo -e "${GREEN}RTL8814AU driver already present${NC}"
+fi
+
+# Ralink RT5370 (Built into many adapters, usually works but may need update)
+if ! lsmod | grep -q rt2800usb; then
+    echo -e "${BLUE}Installing RT5370 driver...${NC}"
+    modprobe rt2800usb
+    print_success "RT5370 driver loaded"
+else
+    echo -e "${GREEN}RT5370 driver already present${NC}"
+fi
+
+# MediaTek MT7612U (Alfa AWUS036ACM, Panda PAU0D)
+if ! lsmod | grep -q mt76x2u; then
+    echo -e "${BLUE}Installing MT7612U driver...${NC}"
+    cd /tmp
+    git clone https://github.com/aircrack-ng/rtl8812au.git
+    cd rtl8812au
+    make && make install
+    cd /tmp && rm -rf rtl8812au
+    print_success "MT7612U driver installed"
+else
+    echo -e "${GREEN}MT7612U driver already present${NC}"
+fi
+
+print_success "WiFi adapter drivers installed"
 
 # Create installation directory
 print_status "Creating installation directory..."
