@@ -83,6 +83,8 @@ By downloading, installing, or using this software, you agree that:
 
 ### Quick Install
 
+#### For Raspberry Pi (Production):
+
 1. **Clone the repository**
    ```bash
    cd ~
@@ -104,6 +106,31 @@ By downloading, installing, or using this software, you agree that:
    - ✅ Initialize the database
    - ✅ Detect WiFi interfaces
    - ✅ Start services automatically
+
+#### For Development/Testing (Windows/Linux/macOS):
+
+**🐛 Debug Mode** - Test PenDonn without hardware requirements!
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run in debug mode
+python main.py --debug
+
+# Or use the launcher (Windows)
+.\start-debug.ps1
+```
+
+**Features of Debug Mode:**
+- ✅ No root/sudo required
+- ✅ No hardware dependencies
+- ✅ Simulates WiFi scanning and handshake capture
+- ✅ Mock password cracking with test data
+- ✅ Full web interface functionality
+- ✅ Works on any OS (Windows/Linux/macOS)
+
+**📚 See [DEBUG_QUICKSTART.md](DEBUG_QUICKSTART.md) and [TESTING.md](TESTING.md) for complete testing guide**
 
 ### Post-Installation Configuration
 

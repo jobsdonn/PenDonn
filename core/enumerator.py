@@ -35,9 +35,15 @@ class NetworkEnumerator:
         self.running = False
         self.active_scans = {}  # scan_id -> scan_info
         
-        self.nm = nmap.PortScanner()
-        
-        logger.info("Network Enumerator initialized")
+        # Initialize nmap only if available
+        try:
+            self.nm = nmap.PortScanner()
+            logger.info("Network Enumerator initialized with nmap")
+        except Exception as e:
+            logger.warning(f"nmap not available: {e}")
+            logger.warning("Network enumeration will be disabled")
+            self.nm = None
+            self.enabled = False
     
     def start(self):
         """Start enumeration service"""

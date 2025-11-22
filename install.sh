@@ -86,7 +86,8 @@ apt-get update -qq
 print_success "System packages updated"
 
 # Install system dependencies
-print_status "Installing system dependencies..."
+print_status "Installing system dependencies (this may take several minutes)..."
+echo -e "${YELLOW}Note: You'll see the actual apt-get output below${NC}"
 apt-get install -y \
     python3 \
     python3-pip \
@@ -106,8 +107,7 @@ apt-get install -y \
     sqlite3 \
     hostapd \
     dnsmasq \
-    nginx \
-    > /dev/null 2>&1
+    nginx
 print_success "System dependencies installed"
 
 # Create installation directory
@@ -133,16 +133,17 @@ source venv/bin/activate
 print_success "Virtual environment created"
 
 # Install Python packages
-print_status "Installing Python dependencies..."
-pip install --upgrade pip > /dev/null 2>&1
-pip install -r requirements.txt > /dev/null 2>&1
+print_status "Installing Python dependencies (this may take a few minutes)..."
+pip install --upgrade pip
+echo -e "${YELLOW}Installing packages from requirements.txt...${NC}"
+pip install -r requirements.txt
 print_success "Python dependencies installed"
 
 # Download rockyou wordlist
-print_status "Downloading rockyou.txt wordlist..."
+print_status "Downloading rockyou.txt wordlist (140MB, may take a while)..."
 mkdir -p /usr/share/wordlists
 if [ ! -f /usr/share/wordlists/rockyou.txt ]; then
-    wget -q https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt -O /usr/share/wordlists/rockyou.txt
+    wget --progress=bar:force https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt -O /usr/share/wordlists/rockyou.txt
     print_success "Rockyou wordlist downloaded"
 else
     print_success "Rockyou wordlist already exists"

@@ -1,0 +1,45 @@
+# Test Data - Mini Wordlist
+# This is a small wordlist for testing debug mode
+# In production, use /usr/share/wordlists/rockyou.txt
+
+password
+password123
+admin
+admin123
+root
+toor
+123456
+12345678
+qwerty
+abc123
+letmein
+welcome
+welcome1
+monkey
+dragon
+master
+trustno1
+hello
+freedom
+whatever
+qazwsx
+starwars
+password1
+test
+test123
+guest
+guest123
+wifi
+wifi123
+internet
+default
+changeme
+password!
+Pa55word
+P@ssw0rd
+admin@123
+root123
+user
+user123
+demo
+demo123

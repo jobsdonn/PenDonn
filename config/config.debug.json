@@ -3,15 +3,15 @@
     "name": "PenDonn",
     "version": "1.0.0",
     "auto_start": true,
-    "log_level": "INFO"
+    "log_level": "DEBUG"
   },
   "debug": {
-    "enabled": false,
-    "mock_wifi": false,
-    "mock_display": false,
-    "mock_cracking": false,
-    "test_data_generation": false,
-    "verbose_logging": false,
+    "enabled": true,
+    "mock_wifi": true,
+    "mock_display": true,
+    "mock_cracking": true,
+    "test_data_generation": true,
+    "verbose_logging": true,
     "simulate_delays": true
   },
   "wifi": {
@@ -22,12 +22,12 @@
     "handshake_timeout": 300
   },
   "whitelist": {
-    "ssids": []
+    "ssids": ["MyHomeWiFi", "WorkNetwork"]
   },
   "cracking": {
     "enabled": true,
     "engines": ["john", "hashcat"],
-    "wordlist_path": "/usr/share/wordlists/rockyou.txt",
+    "wordlist_path": "./test_data/mini_wordlist.txt",
     "auto_start_cracking": true,
     "max_concurrent_cracks": 2,
     "john_format": "wpapsk",
@@ -37,8 +37,8 @@
     "enabled": true,
     "auto_scan_on_crack": true,
     "nmap_timing": "T4",
-    "port_scan_range": "1-10000",
-    "scan_timeout": 3600
+    "port_scan_range": "1-1000",
+    "scan_timeout": 600
   },
   "plugins": {
     "enabled": true,
@@ -46,18 +46,18 @@
     "auto_load": true
   },
   "database": {
-    "path": "./data/pendonn.db",
+    "path": "./data/pendonn_debug.db",
     "backup_on_export": true
   },
   "web": {
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "port": 8080,
-    "secret_key": "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION"
+    "secret_key": "DEBUG_SECRET_KEY_DO_NOT_USE_IN_PRODUCTION"
   },
   "display": {
     "enabled": true,
-    "type": "waveshare_v4",
-    "refresh_interval": 2,
+    "type": "mock_console",
+    "refresh_interval": 5,
     "brightness": 80
   }
 }

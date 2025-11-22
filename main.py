@@ -13,11 +13,9 @@ import time
 from datetime import datetime
 
 from core.database import Database
-from core.wifi_monitor import WiFiMonitor
-from core.cracker import PasswordCracker
 from core.plugin_manager import PluginManager
 from core.enumerator import NetworkEnumerator
-from core.display import Display
+from core.cracker import PasswordCracker
 
 # Configure logging
 log_dir = "./logs"
@@ -50,6 +48,14 @@ class PenDonn:
         
         logger.info(f"PenDonn v{self.config['system']['version']}")
         
+        # Check if debug mode is enabled
+        self.debug_mode = self.config.get('debug', {}).get('enabled', False)
+        if self.debug_mode:
+            logger.warning("=" * 60)
+            logger.warning("DEBUG MODE ENABLED - Using mock hardware modules")
+            logger.warning("=" * 60)
+            logging.getLogger().setLevel(logging.DEBUG if self.config['debug'].get('verbose_logging') else logging.INFO)
+        
         # Initialize database
         logger.info("Initializing database...")
         self.db = Database(self.config['database']['path'])
@@ -59,12 +65,21 @@ class PenDonn:
         self.plugin_manager = PluginManager(self.config, self.db)
         self.plugin_manager.load_plugins()
         
-        # Initialize modules
+        # Initialize modules based on debug mode
         logger.info("Initializing WiFi monitor...")
-        self.wifi_monitor = WiFiMonitor(self.config, self.db)
+        if self.debug_mode and self.config['debug'].get('mock_wifi', False):
+            from core.mock_wifi_monitor import MockWiFiMonitor
+            self.wifi_monitor = MockWiFiMonitor(self.config, self.db)
+        else:
+            from core.wifi_monitor import WiFiMonitor
+            self.wifi_monitor = WiFiMonitor(self.config, self.db)
         
         logger.info("Initializing password cracker...")
-        self.cracker = PasswordCracker(self.config, self.db)
+        if self.debug_mode and self.config['debug'].get('mock_cracking', False):
+            from core.mock_cracker import MockPasswordCracker
+            self.cracker = MockPasswordCracker(self.config, self.db)
+        else:
+            self.cracker = PasswordCracker(self.config, self.db)
         
         logger.info("Initializing network enumerator...")
         self.enumerator = NetworkEnumerator(self.config, self.db, self.plugin_manager)
@@ -72,7 +87,12 @@ class PenDonn:
         # Initialize display
         if self.config['display']['enabled']:
             logger.info("Initializing display...")
-            self.display = Display(self.config, self.db)
+            if self.debug_mode and self.config['debug'].get('mock_display', False):
+                from core.mock_display import MockDisplay
+                self.display = MockDisplay(self.config, self.db)
+            else:
+                from core.display import Display
+                self.display = Display(self.config, self.db)
         else:
             self.display = None
         
@@ -164,11 +184,25 @@ class PenDonn:
 
 def main():
     """Main entry point"""
-    # Check if running as root
-    if os.geteuid() != 0:
-        print("ERROR: PenDonn must be run as root")
-        print("Please run with sudo or as root user")
-        sys.exit(1)
+    # Parse command line arguments
+    config_file = 'config.json'
+    if len(sys.argv) > 1:
+        if sys.argv[1] == '--debug':
+            config_file = 'config.debug.json'
+            print("\n🐛 DEBUG MODE ENABLED - Using debug configuration\n")
+    
+    # Check if running as root (skip in debug mode)
+    config_path = os.path.join(os.path.dirname(__file__), 'config', config_file)
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    
+    debug_mode = config.get('debug', {}).get('enabled', False)
+    
+    if not debug_mode and os.name != 'nt':  # Only check on Unix systems, not Windows
+        if os.geteuid() != 0:
+            print("ERROR: PenDonn must be run as root")
+            print("Please run with sudo or as root user")
+            sys.exit(1)
     
     # Legal warning
     print("\n" + "=" * 60)
@@ -181,7 +215,6 @@ def main():
     
     # Initialize and start
     try:
-        config_path = os.path.join(os.path.dirname(__file__), 'config', 'config.json')
         pendonn = PenDonn(config_path)
         pendonn.start()
     
