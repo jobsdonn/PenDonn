@@ -195,11 +195,18 @@ else
         if ! lsmod | grep -q 8188eu; then
             echo -e "${BLUE}[1/8] Installing RTL8188EU driver...${NC}"
             cd /tmp
-            git clone https://github.com/aircrack-ng/rtl8188eus.git 2>&1 | grep -v "^Cloning"
-            cd rtl8188eus
-            make -j$(nproc) > /dev/null 2>&1 && make install
-            cd /tmp && rm -rf rtl8188eus
-            print_success "RTL8188EU driver installed"
+            rm -rf rtl8188eus 2>/dev/null
+            if git clone --depth 1 https://github.com/aircrack-ng/rtl8188eus.git; then
+                cd rtl8188eus
+                if make -j$(nproc) && make install; then
+                    print_success "RTL8188EU driver installed"
+                else
+                    print_warning "RTL8188EU driver compilation failed (non-critical)"
+                fi
+                cd /tmp && rm -rf rtl8188eus
+            else
+                print_warning "Failed to download RTL8188EU driver"
+            fi
         else
             echo -e "${GREEN}[1/8] RTL8188EU driver already present${NC}"
         fi
@@ -210,11 +217,18 @@ else
         if ! lsmod | grep -q 8812au; then
             echo -e "${BLUE}[2/8] Installing RTL8812AU driver...${NC}"
             cd /tmp
-            git clone https://github.com/aircrack-ng/rtl8812au.git 2>&1 | grep -v "^Cloning"
-            cd rtl8812au
-            make -j$(nproc) > /dev/null 2>&1 && make install
-            cd /tmp && rm -rf rtl8812au
-            print_success "RTL8812AU driver installed"
+            rm -rf rtl8812au 2>/dev/null
+            if git clone --depth 1 https://github.com/aircrack-ng/rtl8812au.git; then
+                cd rtl8812au
+                if make -j$(nproc) && make install; then
+                    print_success "RTL8812AU driver installed"
+                else
+                    print_warning "RTL8812AU driver compilation failed (non-critical)"
+                fi
+                cd /tmp && rm -rf rtl8812au
+            else
+                print_warning "Failed to download RTL8812AU driver"
+            fi
         else
             echo -e "${GREEN}[2/8] RTL8812AU driver already present${NC}"
         fi
@@ -225,11 +239,18 @@ else
         if ! lsmod | grep -q 8814au; then
             echo -e "${BLUE}[3/8] Installing RTL8814AU driver...${NC}"
             cd /tmp
-            git clone https://github.com/aircrack-ng/rtl8814au.git 2>&1 | grep -v "^Cloning"
-            cd rtl8814au
-            make -j$(nproc) > /dev/null 2>&1 && make install
-            cd /tmp && rm -rf rtl8814au
-            print_success "RTL8814AU driver installed"
+            rm -rf rtl8814au 2>/dev/null
+            if git clone --depth 1 https://github.com/aircrack-ng/rtl8814au.git; then
+                cd rtl8814au
+                if make -j$(nproc) && make install; then
+                    print_success "RTL8814AU driver installed"
+                else
+                    print_warning "RTL8814AU driver compilation failed (non-critical)"
+                fi
+                cd /tmp && rm -rf rtl8814au
+            else
+                print_warning "Failed to download RTL8814AU driver"
+            fi
         else
             echo -e "${GREEN}[3/8] RTL8814AU driver already present${NC}"
         fi
@@ -240,11 +261,18 @@ else
         if ! lsmod | grep -q 8822bu; then
             echo -e "${BLUE}[4/8] Installing RTL8822BU driver...${NC}"
             cd /tmp
-            git clone https://github.com/morrownr/88x2bu-20210702.git 2>&1 | grep -v "^Cloning"
-            cd 88x2bu-20210702
-            make -j$(nproc) > /dev/null 2>&1 && make install
-            cd /tmp && rm -rf 88x2bu-20210702
-            print_success "RTL8822BU driver installed"
+            rm -rf 88x2bu-20210702 2>/dev/null
+            if git clone --depth 1 https://github.com/morrownr/88x2bu-20210702.git; then
+                cd 88x2bu-20210702
+                if make -j$(nproc) && make install; then
+                    print_success "RTL8822BU driver installed"
+                else
+                    print_warning "RTL8822BU driver compilation failed (non-critical)"
+                fi
+                cd /tmp && rm -rf 88x2bu-20210702
+            else
+                print_warning "Failed to download RTL8822BU driver"
+            fi
         else
             echo -e "${GREEN}[4/8] RTL8822BU driver already present${NC}"
         fi
@@ -255,11 +283,18 @@ else
         if ! lsmod | grep -q 8821cu; then
             echo -e "${BLUE}[5/8] Installing RTL8821CU driver...${NC}"
             cd /tmp
-            git clone https://github.com/morrownr/8821cu-20210118.git 2>&1 | grep -v "^Cloning"
-            cd 8821cu-20210118
-            make -j$(nproc) > /dev/null 2>&1 && make install
-            cd /tmp && rm -rf 8821cu-20210118
-            print_success "RTL8821CU driver installed"
+            rm -rf 8821cu-20210118 2>/dev/null
+            if git clone --depth 1 https://github.com/morrownr/8821cu-20210118.git; then
+                cd 8821cu-20210118
+                if make -j$(nproc) && make install; then
+                    print_success "RTL8821CU driver installed"
+                else
+                    print_warning "RTL8821CU driver compilation failed (non-critical)"
+                fi
+                cd /tmp && rm -rf 8821cu-20210118
+            else
+                print_warning "Failed to download RTL8821CU driver"
+            fi
         else
             echo -e "${GREEN}[5/8] RTL8821CU driver already present${NC}"
         fi
@@ -270,11 +305,18 @@ else
         if ! lsmod | grep -q mt76x2u; then
             echo -e "${BLUE}[6/8] Installing MT7612U driver...${NC}"
             cd /tmp
-            git clone https://github.com/aircrack-ng/rtl8812au.git 2>&1 | grep -v "^Cloning"
-            cd rtl8812au
-            make -j$(nproc) > /dev/null 2>&1 && make install
-            cd /tmp && rm -rf rtl8812au
-            print_success "MT7612U driver installed"
+            rm -rf mt7612u 2>/dev/null
+            if git clone --depth 1 https://github.com/aircrack-ng/rtl8812au.git mt7612u; then
+                cd mt7612u
+                if make -j$(nproc) && make install; then
+                    print_success "MT7612U driver installed"
+                else
+                    print_warning "MT7612U driver compilation failed (non-critical)"
+                fi
+                cd /tmp && rm -rf mt7612u
+            else
+                print_warning "Failed to download MT7612U driver"
+            fi
         else
             echo -e "${GREEN}[6/8] MT7612U driver already present${NC}"
         fi
