@@ -345,14 +345,25 @@ else
     fi
 
     print_success "WiFi adapter driver installation complete"
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${RED}⚠️  IMPORTANT: WiFi Drivers Require Reboot${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}New WiFi drivers have been compiled and installed.${NC}"
+    echo -e "${YELLOW}The drivers will NOT work until you reboot the system.${NC}"
+    echo ""
+    echo -e "${BLUE}Installation will continue, but plan to reboot after completion:${NC}"
+    echo -e "  ${GREEN}sudo reboot${NC}"
+    echo ""
+    read -p "Press ENTER to continue installation..." 
 fi
 
 # Prepare installation directory
 print_status "Preparing installation directory..."
 
-# Get the script's directory first
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-echo -e "${BLUE}Source directory: $SCRIPT_DIR${NC}"
+# Get the project root directory (parent of scripts/)
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+echo -e "${BLUE}Project root: $SCRIPT_DIR${NC}"
 echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
 
 # Backup existing data if installation exists
@@ -400,15 +411,25 @@ echo -e "${BLUE}Copying to:   $INSTALL_DIR${NC}"
 
 # Show what we're about to copy
 echo -e "${BLUE}Files in source directory:${NC}"
-ls -la "$SCRIPT_DIR" | head -10
+ls -la "$SCRIPT_DIR" | head -20
+echo ""
+echo -e "${BLUE}Looking for requirements.txt...${NC}"
+if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
+    echo -e "${GREEN}✓ requirements.txt found in source${NC}"
+else
+    echo -e "${RED}✗ requirements.txt NOT found in source!${NC}"
+    echo -e "${RED}Current directory: $(pwd)${NC}"
+    exit 1
+fi
+echo ""
 
 if command -v rsync &> /dev/null; then
     echo -e "${BLUE}Using rsync for file copy...${NC}"
-    rsync -rlptgoD --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data/' --exclude='logs/' --exclude='handshakes/' "$SCRIPT_DIR/" "$INSTALL_DIR/"
+    rsync -rlptgoD --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data/' --exclude='logs/' --exclude='handshakes/' --exclude='scripts/' "$SCRIPT_DIR/" "$INSTALL_DIR/"
 else
     # Fallback to tar for more reliable copying
     echo -e "${BLUE}Using tar for file copy...${NC}"
-    tar --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data' --exclude='logs' --exclude='handshakes' -cf - . | (cd "$INSTALL_DIR" && tar -xf -)
+    tar --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data' --exclude='logs' --exclude='handshakes' --exclude='scripts' -cf - . | (cd "$INSTALL_DIR" && tar -xf -)
 fi
 
 print_success "Files copied"
