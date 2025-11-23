@@ -283,15 +283,15 @@ else
         if ! lsmod | grep -q 8821cu; then
             echo -e "${BLUE}[5/8] Installing RTL8821CU driver...${NC}"
             cd /tmp
-            rm -rf 8821cu-20210118 2>/dev/null
-            if git clone --depth 1 https://github.com/morrownr/8821cu-20210118.git; then
-                cd 8821cu-20210118
+            rm -rf 8821cu 2>/dev/null
+            if git clone --depth 1 https://github.com/brektrou/rtl8821CU.git 8821cu; then
+                cd 8821cu
                 if make -j$(nproc) && make install; then
                     print_success "RTL8821CU driver installed"
                 else
                     print_warning "RTL8821CU driver compilation failed (non-critical)"
                 fi
-                cd /tmp && rm -rf 8821cu-20210118
+                cd /tmp && rm -rf 8821cu
             else
                 print_warning "Failed to download RTL8821CU driver"
             fi
@@ -347,32 +347,56 @@ else
     print_success "WiFi adapter driver installation complete"
 fi
 
-# Create installation directory
-print_status "Creating installation directory..."
+# Prepare installation directory
+print_status "Preparing installation directory..."
+
+# Get the script's directory first
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+echo -e "${BLUE}Source directory: $SCRIPT_DIR${NC}"
+echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
+
+# Clean up existing installation if present (but keep logs and data)
+if [ -d "$INSTALL_DIR" ]; then
+    echo -e "${YELLOW}Backing up existing data and logs...${NC}"
+    mkdir -p /tmp/pendonn_backup
+    [ -d "$INSTALL_DIR/data" ] && cp -r "$INSTALL_DIR/data" /tmp/pendonn_backup/ 2>/dev/null || true
+    [ -d "$INSTALL_DIR/logs" ] && cp -r "$INSTALL_DIR/logs" /tmp/pendonn_backup/ 2>/dev/null || true
+    [ -d "$INSTALL_DIR/handshakes" ] && cp -r "$INSTALL_DIR/handshakes" /tmp/pendonn_backup/ 2>/dev/null || true
+    
+    echo -e "${YELLOW}Cleaning installation directory...${NC}"
+    rm -rf "$INSTALL_DIR"/* 2>/dev/null || true
+fi
+
+# Create directory structure
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data"
 mkdir -p "$INSTALL_DIR/logs"
 mkdir -p "$INSTALL_DIR/plugins"
 mkdir -p "$INSTALL_DIR/handshakes"
 mkdir -p "$INSTALL_DIR/config"
+
+# Restore backed up data
+if [ -d "/tmp/pendonn_backup" ]; then
+    echo -e "${BLUE}Restoring data and logs...${NC}"
+    [ -d "/tmp/pendonn_backup/data" ] && cp -r /tmp/pendonn_backup/data/* "$INSTALL_DIR/data/" 2>/dev/null || true
+    [ -d "/tmp/pendonn_backup/logs" ] && cp -r /tmp/pendonn_backup/logs/* "$INSTALL_DIR/logs/" 2>/dev/null || true
+    [ -d "/tmp/pendonn_backup/handshakes" ] && cp -r /tmp/pendonn_backup/handshakes/* "$INSTALL_DIR/handshakes/" 2>/dev/null || true
+    rm -rf /tmp/pendonn_backup
+fi
+
 print_success "Directory structure created"
 
-# Copy files to installation directory
+# Copy application files
 print_status "Copying application files..."
-# Get the script's directory
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Copy files excluding .venv, .git, and __pycache__
-echo -e "${BLUE}Source directory: $SCRIPT_DIR${NC}"
-echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
-
 if command -v rsync &> /dev/null; then
-    rsync -av --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' ./ "$INSTALL_DIR/"
+    echo -e "${BLUE}Using rsync for file copy...${NC}"
+    rsync -av --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data/' --exclude='logs/' --exclude='handshakes/' ./ "$INSTALL_DIR/"
 else
-    # Fallback to cp if rsync not available
-    print_warning "rsync not found, using cp (this is less reliable)"
-    find . -type f -not -path './.venv/*' -not -path './venv/*' -not -path './.git/*' -not -path '*/__pycache__/*' -not -name '*.pyc' -exec cp --parents {} "$INSTALL_DIR/" \;
+    # Fallback to tar for more reliable copying
+    echo -e "${BLUE}Using tar for file copy...${NC}"
+    tar --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data' --exclude='logs' --exclude='handshakes' -cf - . | (cd "$INSTALL_DIR" && tar -xf -)
 fi
 
 print_success "Files copied"
