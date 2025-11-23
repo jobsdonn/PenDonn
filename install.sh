@@ -355,19 +355,23 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo -e "${BLUE}Source directory: $SCRIPT_DIR${NC}"
 echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
 
-# Clean up existing installation if present (but keep logs and data)
+# Backup existing data if installation exists
 if [ -d "$INSTALL_DIR" ]; then
-    echo -e "${YELLOW}Backing up existing data and logs...${NC}"
+    echo -e "${YELLOW}Found existing installation, backing up data...${NC}"
     mkdir -p /tmp/pendonn_backup
     [ -d "$INSTALL_DIR/data" ] && cp -r "$INSTALL_DIR/data" /tmp/pendonn_backup/ 2>/dev/null || true
     [ -d "$INSTALL_DIR/logs" ] && cp -r "$INSTALL_DIR/logs" /tmp/pendonn_backup/ 2>/dev/null || true
     [ -d "$INSTALL_DIR/handshakes" ] && cp -r "$INSTALL_DIR/handshakes" /tmp/pendonn_backup/ 2>/dev/null || true
     
-    echo -e "${YELLOW}Cleaning installation directory...${NC}"
-    rm -rf "$INSTALL_DIR"/* 2>/dev/null || true
+    # Completely remove old installation
+    echo -e "${YELLOW}Removing old installation...${NC}"
+    chmod -R 755 "$INSTALL_DIR" 2>/dev/null || true
+    rm -rf "$INSTALL_DIR"
+    echo -e "${GREEN}Old installation removed${NC}"
 fi
 
-# Create directory structure
+# Create fresh installation directory
+echo -e "${BLUE}Creating installation directory...${NC}"
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data"
 mkdir -p "$INSTALL_DIR/logs"
@@ -377,11 +381,12 @@ mkdir -p "$INSTALL_DIR/config"
 
 # Restore backed up data
 if [ -d "/tmp/pendonn_backup" ]; then
-    echo -e "${BLUE}Restoring data and logs...${NC}"
+    echo -e "${BLUE}Restoring backed-up data...${NC}"
     [ -d "/tmp/pendonn_backup/data" ] && cp -r /tmp/pendonn_backup/data/* "$INSTALL_DIR/data/" 2>/dev/null || true
     [ -d "/tmp/pendonn_backup/logs" ] && cp -r /tmp/pendonn_backup/logs/* "$INSTALL_DIR/logs/" 2>/dev/null || true
     [ -d "/tmp/pendonn_backup/handshakes" ] && cp -r /tmp/pendonn_backup/handshakes/* "$INSTALL_DIR/handshakes/" 2>/dev/null || true
     rm -rf /tmp/pendonn_backup
+    echo -e "${GREEN}Data restored${NC}"
 fi
 
 print_success "Directory structure created"
@@ -390,9 +395,16 @@ print_success "Directory structure created"
 print_status "Copying application files..."
 cd "$SCRIPT_DIR"
 
+echo -e "${BLUE}Copying from: $SCRIPT_DIR${NC}"
+echo -e "${BLUE}Copying to:   $INSTALL_DIR${NC}"
+
+# Show what we're about to copy
+echo -e "${BLUE}Files in source directory:${NC}"
+ls -la "$SCRIPT_DIR" | head -10
+
 if command -v rsync &> /dev/null; then
     echo -e "${BLUE}Using rsync for file copy...${NC}"
-    rsync -av --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data/' --exclude='logs/' --exclude='handshakes/' ./ "$INSTALL_DIR/"
+    rsync -rlptgoD --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data/' --exclude='logs/' --exclude='handshakes/' "$SCRIPT_DIR/" "$INSTALL_DIR/"
 else
     # Fallback to tar for more reliable copying
     echo -e "${BLUE}Using tar for file copy...${NC}"
