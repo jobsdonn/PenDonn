@@ -121,7 +121,7 @@ if [ $MONITOR_CAPABLE -eq 0 ]; then
     echo -e "${YELLOW}This might mean:${NC}"
     echo -e "  1. Drivers not installed"
     echo -e "  2. Adapters don't support monitor mode"
-    echo -e "  3. Need to run: ${BLUE}sudo ./install-wifi-drivers.sh${NC}"
+    echo -e "  3. Need to run: ${BLUE}sudo scripts/install-wifi-drivers.sh${NC}"
 fi
 echo ""
 
@@ -134,7 +134,7 @@ done
 
 if ! lsmod | grep -qE "8188eu|8812au|8814au|88x2bu|8821cu|rt2800usb|rt5370|ath9k|mt76"; then
     echo -e "${YELLOW}No common pentesting WiFi drivers loaded${NC}"
-    echo -e "${YELLOW}Run: ${BLUE}sudo ./install-wifi-drivers.sh${NC}"
+    echo -e "${YELLOW}Run: ${BLUE}sudo scripts/install-wifi-drivers.sh${NC}"
 fi
 echo ""
 
@@ -162,13 +162,13 @@ echo ""
 
 if [ $MONITOR_CAPABLE -lt 2 ]; then
     echo -e "${YELLOW}! Install drivers for your external adapters:${NC}"
-    echo -e "  ${BLUE}sudo ./install-wifi-drivers.sh${NC}"
+    echo -e "  ${BLUE}sudo scripts/install-wifi-drivers.sh${NC}"
     echo -e "  ${BLUE}sudo reboot${NC}"
     echo ""
 fi
 
 echo -e "${BLUE}Next steps:${NC}"
-echo "1. If drivers missing: ${BLUE}sudo ./install-wifi-drivers.sh${NC}"
+echo "1. If drivers missing: ${BLUE}sudo scripts/install-wifi-drivers.sh${NC}"
 echo "2. Reboot after installing drivers: ${BLUE}sudo reboot${NC}"
 echo "3. Run this script again to verify"
 echo "4. Test monitor mode: ${BLUE}sudo airmon-ng start wlan1${NC}"

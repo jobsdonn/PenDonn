@@ -31,7 +31,7 @@ fi
 # Check if config exists
 if [ ! -f "$CONFIG_FILE" ]; then
     echo -e "${RED}[ERROR]${NC} Configuration file not found: $CONFIG_FILE"
-    echo "Please run installation first: sudo ./install.sh"
+    echo "Please run installation first: sudo scripts/install.sh"
     exit 1
 fi
 
@@ -322,7 +322,7 @@ echo ""
 
 echo -e "${BLUE}Next Steps:${NC}"
 echo "1. Review configuration: ${BLUE}sudo nano $CONFIG_FILE${NC}"
-echo "2. Run safety check: ${BLUE}sudo ./pre-start-check.sh${NC}"
+echo "2. Run safety check: ${BLUE}sudo scripts/pre-start-check.sh${NC}"
 echo "3. Start services: ${BLUE}sudo systemctl start pendonn pendonn-web${NC}"
 echo "4. Check status: ${BLUE}sudo systemctl status pendonn${NC}"
 echo "5. View logs: ${BLUE}sudo journalctl -u pendonn -f${NC}"

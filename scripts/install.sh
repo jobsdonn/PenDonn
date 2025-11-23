@@ -180,7 +180,7 @@ echo
 
 if [[ $DRIVER_CHOICE =~ [Ss] ]]; then
     echo -e "${YELLOW}Skipping WiFi driver installation${NC}"
-    echo -e "${BLUE}You can install them later with: ${GREEN}sudo ./install-wifi-drivers.sh${NC}"
+    echo -e "${BLUE}You can install them later with: ${GREEN}sudo scripts/install-wifi-drivers.sh${NC}"
 else
     INSTALL_ALL=false
     if [[ $DRIVER_CHOICE =~ [Aa] ]]; then

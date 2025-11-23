@@ -6,6 +6,8 @@
 
 **PenDonn** is an automated penetration testing tool designed for Raspberry Pi 4/5 with dual external WiFi adapters and Waveshare V4 display. It automates the process of WiFi network discovery, handshake capture, password cracking, and network enumeration with a dynamic plugin system for vulnerability scanning.
 
+📁 **[Project Structure Documentation](PROJECT_STRUCTURE.md)** - Detailed explanation of directory organization
+
 ## ⚠️ LEGAL DISCLAIMER
 
 **THIS TOOL IS FOR AUTHORIZED PENETRATION TESTING ONLY**
@@ -94,8 +96,8 @@ By downloading, installing, or using this software, you agree that:
 
 2. **Run the installer**
    ```bash
-   chmod +x install.sh
-   sudo ./install.sh
+   chmod +x scripts/install.sh
+   sudo scripts/install.sh
    ```
 
 3. **The installer will:**
