@@ -532,13 +532,14 @@ fi
 print_status "Preparing installation directory..."
 
 # Get the project root directory (parent of scripts/)
-# First get absolute path of the script itself
-SCRIPT_PATH="$(readlink -f "$0")"
-# Then get its parent directory (scripts/)
+# Use BASH_SOURCE to get the script path reliably
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+# Get the scripts/ directory
 SCRIPT_PARENT="$(dirname "$SCRIPT_PATH")"
-# Then go up one level to project root
+# Go up one level to project root
 SCRIPT_DIR="$(dirname "$SCRIPT_PARENT")"
 
+echo -e "${BLUE}Script location: $SCRIPT_PATH${NC}"
 echo -e "${BLUE}Project root: $SCRIPT_DIR${NC}"
 echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
 
