@@ -729,5 +729,72 @@ echo -e "${YELLOW}   This prevents disconnecting your SSH session during install
 echo -e "${YELLOW}   When ready, start services manually:${NC}"
 echo -e "   ${BLUE}sudo systemctl start $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
 echo ""
+
+# Configure system to prevent WiFi driver conflicts
+print_status "Configuring WiFi driver management..."
+
+# Get wlan0 MAC address for persistent naming
+if [ -e /sys/class/net/wlan0/address ]; then
+    WLAN0_MAC=$(cat /sys/class/net/wlan0/address)
+    
+    echo -e "${BLUE}Creating udev rules for persistent interface naming...${NC}"
+    cat > /etc/udev/rules.d/70-persistent-wifi.rules << EOF
+# Ensure built-in WiFi is always wlan0 (management interface)
+SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="$WLAN0_MAC", NAME="wlan0"
+
+# External USB WiFi adapters become wlan1 and wlan2
+# These will be used for pentesting (monitor/attack interfaces)
+EOF
+    print_success "udev rules created"
+else
+    print_warning "wlan0 not found - skipping udev rules"
+fi
+
+# Configure NetworkManager to not manage external interfaces
+if systemctl is-active --quiet NetworkManager; then
+    echo -e "${BLUE}Configuring NetworkManager to ignore wlan1/wlan2...${NC}"
+    
+    if [ -f /etc/NetworkManager/NetworkManager.conf ]; then
+        cp /etc/NetworkManager/NetworkManager.conf /etc/NetworkManager/NetworkManager.conf.backup
+        
+        if grep -q "^\[keyfile\]" /etc/NetworkManager/NetworkManager.conf; then
+            # Add unmanaged-devices to existing [keyfile] section
+            if ! grep -q "unmanaged-devices" /etc/NetworkManager/NetworkManager.conf; then
+                sed -i '/^\[keyfile\]/a unmanaged-devices=interface-name:wlan1;interface-name:wlan2' /etc/NetworkManager/NetworkManager.conf
+            fi
+        else
+            # Add new [keyfile] section
+            echo "" >> /etc/NetworkManager/NetworkManager.conf
+            echo "[keyfile]" >> /etc/NetworkManager/NetworkManager.conf
+            echo "unmanaged-devices=interface-name:wlan1;interface-name:wlan2" >> /etc/NetworkManager/NetworkManager.conf
+        fi
+        print_success "NetworkManager configured"
+    fi
+elif [ -f /etc/dhcpcd.conf ]; then
+    echo -e "${BLUE}Configuring dhcpcd to ignore wlan1/wlan2...${NC}"
+    
+    if ! grep -q "denyinterfaces wlan1 wlan2" /etc/dhcpcd.conf; then
+        cp /etc/dhcpcd.conf /etc/dhcpcd.conf.backup
+        echo "" >> /etc/dhcpcd.conf
+        echo "# PenDonn: Don't manage pentesting interfaces" >> /etc/dhcpcd.conf
+        echo "denyinterfaces wlan1 wlan2" >> /etc/dhcpcd.conf
+        print_success "dhcpcd configured"
+    fi
+fi
+
+echo ""
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}WiFi Driver Protection Configured${NC}"
+echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}Configuration applied:${NC}"
+echo -e "  ✓ wlan0 locked to built-in WiFi (by MAC address)"
+echo -e "  ✓ wlan1/wlan2 reserved for external adapters"
+echo -e "  ✓ Network manager configured to ignore wlan1/wlan2"
+echo ""
+echo -e "${BLUE}After reboot:${NC}"
+echo -e "  • wlan0 = Your management WiFi (stays connected)"
+echo -e "  • wlan1 = Monitor interface (scans networks)"
+echo -e "  • wlan2 = Attack interface (captures handshakes)"
+echo ""
 echo -e "${GREEN}Installation complete! Configure before starting services.${NC}"
 echo ""
