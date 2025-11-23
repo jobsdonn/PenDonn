@@ -161,83 +161,148 @@ echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━�
 echo -e "${BLUE}WiFi Driver Installation${NC}"
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo "WiFi adapter drivers take 10-15 minutes to compile."
-echo "You can:"
-echo "  1. Install now (recommended for first-time setup)"
-echo "  2. Skip and install later with: sudo ./install-wifi-drivers.sh"
+echo "Select which WiFi adapter drivers to install:"
 echo ""
-read -p "Install WiFi drivers now? [y/N]: " -n 1 -r
+echo "  1) RTL8188EU/EUS  - TP-Link TL-WN722N v2/v3, many cheap adapters"
+echo "  2) RTL8812AU      - Alfa AWUS036ACH, AWUS036AC (dual-band, recommended)"
+echo "  3) RTL8814AU      - Alfa AWUS1900 (high-power)"
+echo "  4) RTL8822BU      - Realtek 8822BU chipset"
+echo "  5) RTL8821CU      - Realtek 8821CU chipset"
+echo "  6) MT7612U        - Alfa AWUS036ACM, Panda PAU0D"
+echo "  7) RT5370         - Ralink RT5370 (built into many adapters)"
+echo "  8) AR9271         - Atheros AR9271 (TP-Link TL-WN722N v1)"
+echo "  a) Install ALL drivers (takes 10-15 minutes)"
+echo "  s) Skip driver installation"
+echo ""
+echo "Enter your choices (e.g., '1 2 3' or 'a' for all, 's' to skip):"
+read -p "> " DRIVER_CHOICE
 echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # Install WiFi adapter drivers
-    print_status "Installing WiFi adapter drivers (this may take 10-15 minutes)..."
-    echo -e "${YELLOW}Installing drivers for popular pentesting WiFi adapters...${NC}"
 
-# Realtek RTL8188EU/RTL8188EUS (TP-Link TL-WN722N v2/v3, many cheap adapters)
-if ! lsmod | grep -q 8188eu; then
-    echo -e "${BLUE}Installing RTL8188EU driver...${NC}"
-    cd /tmp
-    git clone https://github.com/aircrack-ng/rtl8188eus.git
-    cd rtl8188eus
-    make && make install
-    cd /tmp && rm -rf rtl8188eus
-    print_success "RTL8188EU driver installed"
-else
-    echo -e "${GREEN}RTL8188EU driver already present${NC}"
-fi
-
-# Realtek RTL8812AU/RTL8821AU (Alfa AWUS036ACH, AWUS036AC, many dual-band adapters)
-if ! lsmod | grep -q 8812au; then
-    echo -e "${BLUE}Installing RTL8812AU driver...${NC}"
-    cd /tmp
-    git clone https://github.com/aircrack-ng/rtl8812au.git
-    cd rtl8812au
-    make && make install
-    cd /tmp && rm -rf rtl8812au
-    print_success "RTL8812AU driver installed"
-else
-    echo -e "${GREEN}RTL8812AU driver already present${NC}"
-fi
-
-# Realtek RTL8814AU (Alfa AWUS1900, high-power adapters)
-if ! lsmod | grep -q 8814au; then
-    echo -e "${BLUE}Installing RTL8814AU driver...${NC}"
-    cd /tmp
-    git clone https://github.com/aircrack-ng/rtl8814au.git
-    cd rtl8814au
-    make && make install
-    cd /tmp && rm -rf rtl8814au
-    print_success "RTL8814AU driver installed"
-else
-    echo -e "${GREEN}RTL8814AU driver already present${NC}"
-fi
-
-# Ralink RT5370 (Built into many adapters, usually works but may need update)
-if ! lsmod | grep -q rt2800usb; then
-    echo -e "${BLUE}Installing RT5370 driver...${NC}"
-    modprobe rt2800usb
-    print_success "RT5370 driver loaded"
-else
-    echo -e "${GREEN}RT5370 driver already present${NC}"
-fi
-
-# MediaTek MT7612U (Alfa AWUS036ACM, Panda PAU0D)
-if ! lsmod | grep -q mt76x2u; then
-    echo -e "${BLUE}Installing MT7612U driver...${NC}"
-    cd /tmp
-    git clone https://github.com/aircrack-ng/rtl8812au.git
-    cd rtl8812au
-    make && make install
-    cd /tmp && rm -rf rtl8812au
-    print_success "MT7612U driver installed"
-else
-    echo -e "${GREEN}MT7612U driver already present${NC}"
-fi
-
-    print_success "WiFi adapter drivers installed"
-else
+if [[ $DRIVER_CHOICE =~ [Ss] ]]; then
     echo -e "${YELLOW}Skipping WiFi driver installation${NC}"
     echo -e "${BLUE}You can install them later with: ${GREEN}sudo ./install-wifi-drivers.sh${NC}"
+else
+    INSTALL_ALL=false
+    if [[ $DRIVER_CHOICE =~ [Aa] ]]; then
+        INSTALL_ALL=true
+        print_status "Installing ALL WiFi adapter drivers (this may take 10-15 minutes)..."
+    else
+        print_status "Installing selected WiFi adapter drivers..."
+    fi
+    
+    # RTL8188EU/RTL8188EUS (TP-Link TL-WN722N v2/v3, many cheap adapters)
+    if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 1 ]]; then
+        if ! lsmod | grep -q 8188eu; then
+            echo -e "${BLUE}[1/8] Installing RTL8188EU driver...${NC}"
+            cd /tmp
+            git clone https://github.com/aircrack-ng/rtl8188eus.git 2>&1 | grep -v "^Cloning"
+            cd rtl8188eus
+            make -j$(nproc) > /dev/null 2>&1 && make install
+            cd /tmp && rm -rf rtl8188eus
+            print_success "RTL8188EU driver installed"
+        else
+            echo -e "${GREEN}[1/8] RTL8188EU driver already present${NC}"
+        fi
+    fi
+
+    # Realtek RTL8812AU/RTL8821AU (Alfa AWUS036ACH, AWUS036AC, many dual-band adapters)
+    if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 2 ]]; then
+        if ! lsmod | grep -q 8812au; then
+            echo -e "${BLUE}[2/8] Installing RTL8812AU driver...${NC}"
+            cd /tmp
+            git clone https://github.com/aircrack-ng/rtl8812au.git 2>&1 | grep -v "^Cloning"
+            cd rtl8812au
+            make -j$(nproc) > /dev/null 2>&1 && make install
+            cd /tmp && rm -rf rtl8812au
+            print_success "RTL8812AU driver installed"
+        else
+            echo -e "${GREEN}[2/8] RTL8812AU driver already present${NC}"
+        fi
+    fi
+
+    # Realtek RTL8814AU (Alfa AWUS1900, high-power adapters)
+    if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 3 ]]; then
+        if ! lsmod | grep -q 8814au; then
+            echo -e "${BLUE}[3/8] Installing RTL8814AU driver...${NC}"
+            cd /tmp
+            git clone https://github.com/aircrack-ng/rtl8814au.git 2>&1 | grep -v "^Cloning"
+            cd rtl8814au
+            make -j$(nproc) > /dev/null 2>&1 && make install
+            cd /tmp && rm -rf rtl8814au
+            print_success "RTL8814AU driver installed"
+        else
+            echo -e "${GREEN}[3/8] RTL8814AU driver already present${NC}"
+        fi
+    fi
+
+    # Realtek RTL8822BU
+    if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 4 ]]; then
+        if ! lsmod | grep -q 8822bu; then
+            echo -e "${BLUE}[4/8] Installing RTL8822BU driver...${NC}"
+            cd /tmp
+            git clone https://github.com/morrownr/88x2bu-20210702.git 2>&1 | grep -v "^Cloning"
+            cd 88x2bu-20210702
+            make -j$(nproc) > /dev/null 2>&1 && make install
+            cd /tmp && rm -rf 88x2bu-20210702
+            print_success "RTL8822BU driver installed"
+        else
+            echo -e "${GREEN}[4/8] RTL8822BU driver already present${NC}"
+        fi
+    fi
+
+    # Realtek RTL8821CU
+    if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 5 ]]; then
+        if ! lsmod | grep -q 8821cu; then
+            echo -e "${BLUE}[5/8] Installing RTL8821CU driver...${NC}"
+            cd /tmp
+            git clone https://github.com/morrownr/8821cu-20210118.git 2>&1 | grep -v "^Cloning"
+            cd 8821cu-20210118
+            make -j$(nproc) > /dev/null 2>&1 && make install
+            cd /tmp && rm -rf 8821cu-20210118
+            print_success "RTL8821CU driver installed"
+        else
+            echo -e "${GREEN}[5/8] RTL8821CU driver already present${NC}"
+        fi
+    fi
+
+    # MediaTek MT7612U (Alfa AWUS036ACM, Panda PAU0D)
+    if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 6 ]]; then
+        if ! lsmod | grep -q mt76x2u; then
+            echo -e "${BLUE}[6/8] Installing MT7612U driver...${NC}"
+            cd /tmp
+            git clone https://github.com/aircrack-ng/rtl8812au.git 2>&1 | grep -v "^Cloning"
+            cd rtl8812au
+            make -j$(nproc) > /dev/null 2>&1 && make install
+            cd /tmp && rm -rf rtl8812au
+            print_success "MT7612U driver installed"
+        else
+            echo -e "${GREEN}[6/8] MT7612U driver already present${NC}"
+        fi
+    fi
+
+    # Ralink RT5370 (Built into many adapters, usually works but may need update)
+    if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 7 ]]; then
+        if ! lsmod | grep -q rt2800usb; then
+            echo -e "${BLUE}[7/8] Loading RT5370 driver...${NC}"
+            modprobe rt2800usb
+            print_success "RT5370 driver loaded"
+        else
+            echo -e "${GREEN}[7/8] RT5370 driver already present${NC}"
+        fi
+    fi
+
+    # Atheros AR9271 (TP-Link TL-WN722N v1)
+    if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 8 ]]; then
+        if ! lsmod | grep -q ath9k_htc; then
+            echo -e "${BLUE}[8/8] Loading AR9271 driver...${NC}"
+            modprobe ath9k_htc
+            print_success "AR9271 driver loaded"
+        else
+            echo -e "${GREEN}[8/8] AR9271 driver already present${NC}"
+        fi
+    fi
+
+    print_success "WiFi adapter driver installation complete"
 fi
 
 # Create installation directory
