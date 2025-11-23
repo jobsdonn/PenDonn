@@ -222,6 +222,110 @@ echo ""
 echo -e "${YELLOW}This ensures your built-in WiFi stays connected after reboot!${NC}"
 echo ""
 
+# Configure automatic WiFi reconnection on boot
+echo -e "${BLUE}Setting up automatic WiFi reconnection service...${NC}"
+
+# Get current WiFi connection details
+CURRENT_SSID=$(iwgetid -r 2>/dev/null || nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d':' -f2 2>/dev/null || echo "")
+
+if [ -n "$CURRENT_SSID" ]; then
+    echo -e "${GREEN}Current WiFi: $CURRENT_SSID${NC}"
+    read -p "Save this WiFi for automatic reconnection on boot? (yes/no) [yes]: " SAVE_WIFI
+    SAVE_WIFI=${SAVE_WIFI:-yes}
+    
+    if [ "$SAVE_WIFI" = "yes" ]; then
+        # Create WiFi reconnection script
+        cat > /usr/local/bin/pendonn-wifi-keeper.sh << 'EOFWIFI'
+#!/bin/bash
+# PenDonn WiFi Keeper - Ensures wlan0 stays connected
+
+INTERFACE="wlan0"
+MAX_RETRIES=10
+RETRY_DELAY=5
+
+# Wait for interface to exist
+for i in $(seq 1 $MAX_RETRIES); do
+    if [ -e "/sys/class/net/$INTERFACE" ]; then
+        echo "Interface $INTERFACE found"
+        break
+    fi
+    echo "Waiting for $INTERFACE... ($i/$MAX_RETRIES)"
+    sleep $RETRY_DELAY
+done
+
+# Check if we have NetworkManager
+if systemctl is-active --quiet NetworkManager; then
+    echo "Using NetworkManager for WiFi management"
+    
+    # Wait for NetworkManager to be ready
+    sleep 5
+    
+    # Check if already connected
+    if nmcli -t -f DEVICE,STATE dev | grep "^$INTERFACE:connected" > /dev/null; then
+        echo "Already connected to WiFi"
+        exit 0
+    fi
+    
+    # Try to reconnect
+    echo "Attempting WiFi reconnection..."
+    nmcli device connect $INTERFACE
+    
+elif command -v wpa_supplicant > /dev/null; then
+    echo "Using wpa_supplicant for WiFi management"
+    
+    # Check if wlan0 is up
+    if ! ip link show $INTERFACE | grep -q "UP"; then
+        ip link set $INTERFACE up
+    fi
+    
+    # Wait for connection
+    for i in $(seq 1 $MAX_RETRIES); do
+        if iwgetid -r > /dev/null 2>&1; then
+            echo "WiFi connected"
+            exit 0
+        fi
+        echo "Waiting for WiFi connection... ($i/$MAX_RETRIES)"
+        sleep $RETRY_DELAY
+    done
+fi
+
+echo "WiFi keeper completed"
+EOFWIFI
+
+        chmod +x /usr/local/bin/pendonn-wifi-keeper.sh
+        
+        # Create systemd service for WiFi keeper
+        cat > /etc/systemd/system/pendonn-wifi-keeper.service << EOFSERVICE
+[Unit]
+Description=PenDonn WiFi Keeper
+After=network-pre.target
+Before=network.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pendonn-wifi-keeper.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOFSERVICE
+
+        # Enable the service
+        systemctl daemon-reload
+        systemctl enable pendonn-wifi-keeper.service
+        
+        print_success "WiFi keeper service installed (will reconnect wlan0 on boot)"
+    fi
+else
+    print_warning "No active WiFi connection detected - WiFi keeper not configured"
+    echo -e "${YELLOW}You can manually configure WiFi reconnection later if needed${NC}"
+fi
+
+echo ""
+
 # Ask about WiFi driver installation
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}WiFi Driver Installation${NC}"
