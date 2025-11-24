@@ -562,15 +562,42 @@ fi
 print_status "Preparing installation directory..."
 
 # Get the project root directory (parent of scripts/)
-# Use BASH_SOURCE to get the script path reliably
-SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-# Get the scripts/ directory
-SCRIPT_PARENT="$(dirname "$SCRIPT_PATH")"
-# Go up one level to project root
-SCRIPT_DIR="$(dirname "$SCRIPT_PARENT")"
+# Multiple fallback methods to ensure we find it
+if [ -n "${BASH_SOURCE[0]}" ] && [[ "${BASH_SOURCE[0]}" == */* ]]; then
+    # Method 1: BASH_SOURCE with full path
+    SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+    SCRIPT_DIR="$(dirname "$(dirname "$SCRIPT_PATH")")"
+elif [ -f "$PWD/install.sh" ]; then
+    # Method 2: Running from scripts/ directory
+    SCRIPT_DIR="$(dirname "$PWD")"
+elif [ -f "$PWD/scripts/install.sh" ]; then
+    # Method 3: Running from project root
+    SCRIPT_DIR="$PWD"
+else
+    # Method 4: Search for PenDonn directory structure
+    SEARCH_DIR="$PWD"
+    while [ "$SEARCH_DIR" != "/" ]; do
+        if [ -f "$SEARCH_DIR/requirements.txt" ] && [ -d "$SEARCH_DIR/core" ]; then
+            SCRIPT_DIR="$SEARCH_DIR"
+            break
+        fi
+        SEARCH_DIR="$(dirname "$SEARCH_DIR")"
+    done
+fi
 
-echo -e "${BLUE}Script location: $SCRIPT_PATH${NC}"
-echo -e "${BLUE}Project root: $SCRIPT_DIR${NC}"
+# Verify we found the project root
+if [ -z "$SCRIPT_DIR" ] || [ ! -f "$SCRIPT_DIR/requirements.txt" ]; then
+    echo -e "${RED}ERROR: Cannot locate project root directory!${NC}"
+    echo -e "${YELLOW}Please run this script from the PenDonn directory:${NC}"
+    echo -e "  ${GREEN}cd ~/PenDonn${NC}"
+    echo -e "  ${GREEN}sudo bash scripts/install.sh${NC}"
+    echo ""
+    echo -e "${BLUE}Current directory: $PWD${NC}"
+    echo -e "${BLUE}Script path: ${BASH_SOURCE[0]}${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Found project root: $SCRIPT_DIR${NC}"
 echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
 
 # Backup existing data if installation exists
