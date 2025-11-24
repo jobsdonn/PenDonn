@@ -160,24 +160,46 @@ print_success "System dependencies installed"
 # This prevents external drivers from breaking built-in WiFi
 print_status "Configuring WiFi protection (before driver installation)..."
 
-# Get wlan0 MAC address NOW (before any drivers mess things up)
-if [ -e /sys/class/net/wlan0/address ]; then
-    WLAN0_MAC=$(cat /sys/class/net/wlan0/address)
-    echo -e "${GREEN}Built-in WiFi detected: wlan0 (MAC: $WLAN0_MAC)${NC}"
+# Detect built-in WiFi by driver (not by interface name!)
+BUILTIN_MAC=""
+BUILTIN_IFACE=""
+
+echo -e "${BLUE}Detecting built-in WiFi adapter...${NC}"
+for iface in /sys/class/net/wlan*; do
+    if [ -e "$iface" ]; then
+        IFACE_NAME=$(basename "$iface")
+        DRIVER=$(readlink "$iface/device/driver" 2>/dev/null | xargs basename 2>/dev/null || echo "unknown")
+        MAC=$(cat "$iface/address" 2>/dev/null)
+        
+        echo -e "  Checking $IFACE_NAME: driver=$DRIVER"
+        
+        # Raspberry Pi built-in WiFi uses brcmfmac driver
+        if [[ "$DRIVER" == "brcmfmac" ]] || [[ "$DRIVER" == "brcmutil" ]]; then
+            BUILTIN_MAC="$MAC"
+            BUILTIN_IFACE="$IFACE_NAME"
+            echo -e "${GREEN}  ✓ Found built-in WiFi: $IFACE_NAME (MAC: $MAC)${NC}"
+            break
+        fi
+    fi
+done
+
+if [ -n "$BUILTIN_MAC" ]; then
+    echo -e "${GREEN}Built-in WiFi detected: $BUILTIN_IFACE (MAC: $BUILTIN_MAC)${NC}"
     
     echo -e "${BLUE}Creating udev rules for persistent interface naming...${NC}"
     cat > /etc/udev/rules.d/70-persistent-wifi.rules << EOF
 # PenDonn - Persistent WiFi Interface Naming
 # Created BEFORE driver installation to prevent WiFi loss
 # Built-in WiFi is always wlan0 (management interface)
-SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="$WLAN0_MAC", NAME="wlan0"
+SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="$BUILTIN_MAC", NAME="wlan0"
 
 # External USB WiFi adapters become wlan1 and wlan2
 # These will be used for pentesting (monitor/attack interfaces)
 EOF
-    print_success "udev rules created (wlan0 locked to $WLAN0_MAC)"
+    print_success "udev rules created (wlan0 locked to $BUILTIN_MAC)"
 else
-    print_warning "wlan0 not found - WiFi protection skipped"
+    print_warning "Built-in WiFi not detected - WiFi protection skipped"
+    echo -e "${YELLOW}This is normal if you're using only external adapters${NC}"
 fi
 
 # Configure NetworkManager to not manage external interfaces
@@ -214,26 +236,31 @@ echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}WiFi Protection Configured${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Protection applied:${NC}"
-echo -e "  ✓ wlan0 locked to built-in WiFi (MAC: ${WLAN0_MAC:-unknown})"
-echo -e "  ✓ wlan1/wlan2 reserved for external adapters"
-echo -e "  ✓ Network manager configured to ignore wlan1/wlan2"
-echo ""
-echo -e "${YELLOW}This ensures your built-in WiFi stays connected after reboot!${NC}"
+if [ -n "$BUILTIN_MAC" ]; then
+    echo -e "${BLUE}Protection applied:${NC}"
+    echo -e "  ✓ wlan0 locked to built-in WiFi (MAC: $BUILTIN_MAC)"
+    echo -e "  ✓ wlan1/wlan2 reserved for external adapters"
+    echo -e "  ✓ Network manager configured to ignore wlan1/wlan2"
+    echo ""
+    echo -e "${YELLOW}This ensures your built-in WiFi stays connected after reboot!${NC}"
+else
+    echo -e "${YELLOW}No built-in WiFi detected - using external adapters only${NC}"
+fi
 echo ""
 
 # Configure automatic WiFi reconnection on boot
-echo -e "${BLUE}Setting up automatic WiFi reconnection service...${NC}"
+if [ -n "$BUILTIN_MAC" ]; then
+    echo -e "${BLUE}Setting up automatic WiFi reconnection service...${NC}"
 
-# Get current WiFi connection details
-CURRENT_SSID=$(iwgetid -r 2>/dev/null || nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d':' -f2 2>/dev/null || echo "")
+    # Get current WiFi connection details
+    CURRENT_SSID=$(iwgetid -r 2>/dev/null || nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d':' -f2 2>/dev/null || echo "")
 
-if [ -n "$CURRENT_SSID" ]; then
-    echo -e "${GREEN}Current WiFi: $CURRENT_SSID${NC}"
-    read -p "Save this WiFi for automatic reconnection on boot? (yes/no) [yes]: " SAVE_WIFI
-    SAVE_WIFI=${SAVE_WIFI:-yes}
-    
-    if [ "$SAVE_WIFI" = "yes" ]; then
+    if [ -n "$CURRENT_SSID" ]; then
+        echo -e "${GREEN}Current WiFi: $CURRENT_SSID${NC}"
+        read -p "Save this WiFi for automatic reconnection on boot? (yes/no) [yes]: " SAVE_WIFI
+        SAVE_WIFI=${SAVE_WIFI:-yes}
+        
+        if [ "$SAVE_WIFI" = "yes" ]; then
         # Create WiFi reconnection script
         cat > /usr/local/bin/pendonn-wifi-keeper.sh << 'EOFWIFI'
 #!/bin/bash
@@ -318,10 +345,13 @@ EOFSERVICE
         systemctl enable pendonn-wifi-keeper.service
         
         print_success "WiFi keeper service installed (will reconnect wlan0 on boot)"
+        fi
+    else
+        print_warning "No active WiFi connection detected - WiFi keeper not configured"
+        echo -e "${YELLOW}You can manually configure WiFi reconnection later if needed${NC}"
     fi
 else
-    print_warning "No active WiFi connection detected - WiFi keeper not configured"
-    echo -e "${YELLOW}You can manually configure WiFi reconnection later if needed${NC}"
+    echo -e "${YELLOW}Skipping WiFi keeper setup (no built-in WiFi detected)${NC}"
 fi
 
 echo ""
