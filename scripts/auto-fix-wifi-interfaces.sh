@@ -111,10 +111,64 @@ udevadm control --reload-rules
 udevadm trigger --subsystem-match=net
 log "Reloaded udev rules"
 
-log "=== WiFi interface auto-fix completed - reboot required for changes to take effect ==="
-log "After next reboot, wlan0 will be the built-in WiFi"
+# IMMEDIATE FIX: Rename interfaces NOW (don't wait for reboot)
+log "=== Applying immediate interface rename ==="
 
-# Create flag file to trigger reboot warning
-echo "WiFi interfaces were auto-fixed on $(date). Please reboot for changes to take effect." > /tmp/pendonn-wifi-fixed
+# First, identify which interface currently has the connection
+CONNECTED_IFACE=""
+if command -v nmcli >/dev/null 2>&1; then
+    CONNECTED_IFACE=$(nmcli -t -f DEVICE,STATE dev | grep ':connected$' | cut -d':' -f1 | grep '^wlan' | head -1)
+fi
+
+if [ -z "$CONNECTED_IFACE" ]; then
+    # Fallback: check which interface has IP address
+    CONNECTED_IFACE=$(ip -4 addr show | grep -oP '(?<=^[0-9]: )wlan[0-9]+' | head -1)
+fi
+
+log "Currently connected interface: ${CONNECTED_IFACE:-none}"
+
+# Strategy: Rename interfaces in order, avoiding the connected one until last
+# We need to rename: builtin to wlan0, and shuffle others
+
+if [ "$BUILTIN_IFACE" != "wlan0" ]; then
+    log "Built-in WiFi is on $BUILTIN_IFACE, needs to be wlan0"
+    
+    # Step 1: Move wlan0 out of the way (if it exists and is not builtin)
+    if [ -e /sys/class/net/wlan0 ] && [ "$CONNECTED_IFACE" != "wlan0" ]; then
+        log "Moving existing wlan0 to temp name..."
+        ip link set wlan0 down 2>/dev/null
+        ip link set wlan0 name wlan_temp 2>/dev/null && log "Renamed wlan0 -> wlan_temp" || log "Failed to rename wlan0"
+    fi
+    
+    # Step 2: Rename builtin to wlan0 (carefully if it's connected)
+    if [ "$CONNECTED_IFACE" == "$BUILTIN_IFACE" ]; then
+        log "WARNING: Built-in WiFi is currently connected - attempting careful rename..."
+        # Keep it up during rename to maintain connection
+        ip link set "$BUILTIN_IFACE" name wlan0 2>/dev/null && log "Renamed $BUILTIN_IFACE -> wlan0 (kept connection)" || log "Failed to rename $BUILTIN_IFACE"
+    else
+        log "Renaming built-in WiFi $BUILTIN_IFACE -> wlan0..."
+        ip link set "$BUILTIN_IFACE" down 2>/dev/null
+        ip link set "$BUILTIN_IFACE" name wlan0 2>/dev/null && log "Renamed $BUILTIN_IFACE -> wlan0" || log "Failed to rename $BUILTIN_IFACE"
+        ip link set wlan0 up 2>/dev/null
+    fi
+    
+    # Step 3: Rename temp back to available slot
+    if [ -e /sys/class/net/wlan_temp ]; then
+        log "Moving wlan_temp to next available slot..."
+        ip link set wlan_temp name wlan1 2>/dev/null && log "Renamed wlan_temp -> wlan1" || log "Failed to rename wlan_temp"
+        ip link set wlan1 up 2>/dev/null
+    fi
+    
+    log "Immediate interface renaming completed"
+else
+    log "Built-in WiFi already on wlan0 - no immediate rename needed"
+fi
+
+log "=== WiFi interface auto-fix completed ==="
+log "Interfaces should now be correctly named (wlan0=builtin)"
+log "Udev rules ensure names persist after reboot"
+
+# Create flag file
+echo "WiFi interfaces were auto-fixed on $(date). wlan0 is now the built-in WiFi." > /tmp/pendonn-wifi-fixed
 
 exit 0
