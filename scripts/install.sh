@@ -248,6 +248,34 @@ else
 fi
 echo ""
 
+# Install automatic WiFi interface fixer (runs on every boot)
+echo -e "${BLUE}Installing automatic WiFi interface fixer...${NC}"
+cp "$SCRIPT_DIR/scripts/auto-fix-wifi-interfaces.sh" /usr/local/bin/pendonn-wifi-autofix.sh
+chmod +x /usr/local/bin/pendonn-wifi-autofix.sh
+
+cat > /etc/systemd/system/pendonn-wifi-autofix.service << 'EOFAUTOFIX'
+[Unit]
+Description=PenDonn Auto WiFi Interface Fixer
+After=network-pre.target
+Before=network.target systemd-udev-settle.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pendonn-wifi-autofix.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sysinit.target
+EOFAUTOFIX
+
+systemctl daemon-reload
+systemctl enable pendonn-wifi-autofix.service
+print_success "Auto-fix service installed (checks interface naming on every boot)"
+echo ""
+
 # Configure automatic WiFi reconnection on boot
 if [ -n "$BUILTIN_MAC" ]; then
     echo -e "${BLUE}Setting up automatic WiFi reconnection service...${NC}"
