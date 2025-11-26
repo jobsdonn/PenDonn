@@ -250,10 +250,24 @@ echo ""
 
 # Install automatic WiFi interface fixer (runs on every boot)
 echo -e "${BLUE}Installing automatic WiFi interface fixer...${NC}"
-cp "$SCRIPT_DIR/scripts/auto-fix-wifi-interfaces.sh" /usr/local/bin/pendonn-wifi-autofix.sh
-chmod +x /usr/local/bin/pendonn-wifi-autofix.sh
 
-cat > /etc/systemd/system/pendonn-wifi-autofix.service << 'EOFAUTOFIX'
+# Determine source path for the auto-fix script
+if [ -f "$SCRIPT_DIR/scripts/auto-fix-wifi-interfaces.sh" ]; then
+    AUTOFIX_SOURCE="$SCRIPT_DIR/scripts/auto-fix-wifi-interfaces.sh"
+elif [ -f "$(dirname "${BASH_SOURCE[0]}")/auto-fix-wifi-interfaces.sh" ]; then
+    AUTOFIX_SOURCE="$(dirname "${BASH_SOURCE[0]}")/auto-fix-wifi-interfaces.sh"
+elif [ -f "$PWD/auto-fix-wifi-interfaces.sh" ]; then
+    AUTOFIX_SOURCE="$PWD/auto-fix-wifi-interfaces.sh"
+else
+    print_warning "auto-fix-wifi-interfaces.sh not found - skipping auto-fix installation"
+    AUTOFIX_SOURCE=""
+fi
+
+if [ -n "$AUTOFIX_SOURCE" ]; then
+    cp "$AUTOFIX_SOURCE" /usr/local/bin/pendonn-wifi-autofix.sh
+    chmod +x /usr/local/bin/pendonn-wifi-autofix.sh
+
+    cat > /etc/systemd/system/pendonn-wifi-autofix.service << 'EOFAUTOFIX'
 [Unit]
 Description=PenDonn Auto WiFi Interface Fixer
 After=network-pre.target
@@ -271,9 +285,12 @@ StandardError=journal
 WantedBy=sysinit.target
 EOFAUTOFIX
 
-systemctl daemon-reload
-systemctl enable pendonn-wifi-autofix.service
-print_success "Auto-fix service installed (checks interface naming on every boot)"
+    systemctl daemon-reload
+    systemctl enable pendonn-wifi-autofix.service
+    print_success "Auto-fix service installed (checks interface naming on every boot)"
+else
+    print_warning "Auto-fix service not installed (script not found)"
+fi
 echo ""
 
 # Configure automatic WiFi reconnection on boot
