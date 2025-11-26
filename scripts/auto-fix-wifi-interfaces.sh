@@ -14,6 +14,10 @@ log() {
 
 log "=== PenDonn Auto WiFi Interface Fix Started ==="
 
+# Wait for network interfaces to be fully initialized
+log "Waiting 10 seconds for interfaces to stabilize..."
+sleep 10
+
 # Check if built-in WiFi (brcmfmac) is NOT on wlan0
 BUILTIN_ON_WLAN0=false
 

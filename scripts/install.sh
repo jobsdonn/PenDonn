@@ -628,8 +628,11 @@ WantedBy=sysinit.target
 EOFAUTOFIX
 
     systemctl daemon-reload
-    systemctl enable pendonn-wifi-autofix.service
-    print_success "Auto-fix service installed (checks interface naming on every boot)"
+    # DON'T enable - only for manual recovery
+    # systemctl enable pendonn-wifi-autofix.service
+    print_success "Auto-fix service installed (available for manual recovery)"
+    echo -e "${YELLOW}Note: Auto-fix runs only when needed, not automatically${NC}"
+    echo -e "${YELLOW}Manual trigger: sudo systemctl start pendonn-wifi-autofix${NC}"
 else
     print_warning "auto-fix-wifi-interfaces.sh not found - skipping"
 fi
