@@ -181,89 +181,67 @@ fi
 print_success "System dependencies installed"
 
 # ============================================================================
-# Configure NetworkManager for WiFi Stability (Ragnar approach)
+# Configure Network for PenDonn (MINIMAL - Don't break working WiFi!)
 # ============================================================================
-print_status "Configuring NetworkManager for stable WiFi..."
+print_status "Configuring network for pentesting adapters..."
 
-# Backup existing config
-if [ -f /etc/NetworkManager/NetworkManager.conf ]; then
-    cp /etc/NetworkManager/NetworkManager.conf /etc/NetworkManager/NetworkManager.conf.backup-$(date +%Y%m%d)
+# ONLY configure NetworkManager to ignore wlan1/wlan2
+# DON'T touch any other settings - leave working WiFi alone!
+NMCONF="/etc/NetworkManager/NetworkManager.conf"
+
+# Check if NetworkManager exists
+if [ -f "$NMCONF" ]; then
+    # Backup once if not already backed up
+    if [ ! -f "${NMCONF}.pendonn-backup" ]; then
+        cp "$NMCONF" "${NMCONF}.pendonn-backup"
+    fi
+    
+    # Only add unmanaged-devices if not already present
+    if ! grep -q "unmanaged-devices.*wlan1.*wlan2" "$NMCONF"; then
+        # Check if [keyfile] section exists
+        if grep -q "^\[keyfile\]" "$NMCONF"; then
+            # Add to existing [keyfile] section
+            sed -i '/^\[keyfile\]/a unmanaged-devices=interface-name:wlan1;interface-name:wlan2' "$NMCONF"
+        else
+            # Create [keyfile] section at the end
+            echo "" >> "$NMCONF"
+            echo "[keyfile]" >> "$NMCONF"
+            echo "unmanaged-devices=interface-name:wlan1;interface-name:wlan2" >> "$NMCONF"
+        fi
+        print_success "NetworkManager will ignore wlan1/wlan2 (pentesting adapters)"
+    else
+        print_success "NetworkManager already configured for pentesting adapters"
+    fi
 fi
 
-# Create clean, working configuration (based on Ragnar)
-cat > /etc/NetworkManager/NetworkManager.conf << 'EOFNM'
-[main]
-plugins=ifupdown,keyfile
-dhcp=dhclient
-dns=default
-
-[device]
-# Don't randomize MAC during scans - this disrupts connections!
-wifi.scan-rand-mac-address=no
-# Use wpa_supplicant backend
-wifi.backend=wpa_supplicant
-
-[connection]
-# Disable WiFi power save (can cause disconnects)
-wifi.powersave=2
-# Don't change MAC addresses
-wifi.cloned-mac-address=preserve
-
-[keyfile]
-# Don't manage wlan1/wlan2 - those are for pentesting
-unmanaged-devices=interface-name:wlan1;interface-name:wlan2
-EOFNM
-
-print_success "NetworkManager configured"
-
-# Stop and disable ModemManager (causes WiFi issues)
-if systemctl is-active --quiet ModemManager; then
-    echo -e "${YELLOW}Disabling ModemManager (causes WiFi disconnects)...${NC}"
-    systemctl stop ModemManager
-    systemctl disable ModemManager
-    systemctl mask ModemManager
-    print_success "ModemManager disabled"
-fi
-
-# Ensure rfkill isn't blocking WiFi
-if command -v rfkill >/dev/null 2>&1; then
-    rfkill unblock wifi
-    print_success "WiFi unblocked via rfkill"
-fi
-
-# Configure dhcpcd as fallback (if no NetworkManager)
+# Configure dhcpcd to ignore wlan1/wlan2
 if [ -f /etc/dhcpcd.conf ]; then
     if ! grep -q "denyinterfaces wlan1 wlan2" /etc/dhcpcd.conf; then
-        cp /etc/dhcpcd.conf /etc/dhcpcd.conf.backup
+        cp /etc/dhcpcd.conf /etc/dhcpcd.conf.pendonn-backup
         echo "" >> /etc/dhcpcd.conf
         echo "# PenDonn: Don't manage pentesting interfaces" >> /etc/dhcpcd.conf
         echo "denyinterfaces wlan1 wlan2" >> /etc/dhcpcd.conf
-        print_success "dhcpcd configured"
+        print_success "dhcpcd configured to ignore pentesting adapters"
     fi
 fi
 
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}WiFi Management Configured (Simple & Stable)${NC}"
+echo -e "${GREEN}Network Configuration Complete${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Approach:${NC}"
-echo -e "  ✓ NetworkManager manages wlan0 (built-in WiFi) automatically"
-echo -e "  ✓ wlan1/wlan2 (external adapters) ignored by NetworkManager"
-echo -e "  ✓ NO udev rules (no race conditions!)"
-echo -e "  ✓ NO custom WiFi services (let system handle it)"
-echo -e "  ✓ ModemManager disabled (prevents interference)"
-echo ""
-echo -e "${YELLOW}WiFi will reconnect automatically on boot using NetworkManager${NC}"
+echo -e "${BLUE}Changes made:${NC}"
+echo -e "  ✓ wlan1/wlan2 reserved for pentesting (not managed by system)"
+echo -e "  ✓ wlan0 (built-in WiFi) - LEFT ALONE (keeps working!)"
+echo -e "  ✓ NO other WiFi settings changed"
 echo ""
 
 # Get current WiFi connection for display
 CURRENT_SSID=$(iwgetid -r 2>/dev/null || nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d':' -f2 2>/dev/null || echo "")
 
 if [ -n "$CURRENT_SSID" ]; then
-    echo -e "${GREEN}Current WiFi connected: $CURRENT_SSID${NC}"
-    echo -e "${YELLOW}NetworkManager will automatically reconnect to this network on boot${NC}"
+    echo -e "${GREEN}Current WiFi: $CURRENT_SSID (will keep working after reboot!)${NC}"
 else
-    echo -e "${YELLOW}No active WiFi connection - connect manually after installation${NC}"
+    echo -e "${YELLOW}No active WiFi - connect after installation completes${NC}"
 fi
 echo ""
 
