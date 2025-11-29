@@ -187,6 +187,9 @@ print_status "Detecting WiFi adapters by MAC address..."
 
 echo -e "${YELLOW}Using MAC addresses for stable identification${NC}"
 echo ""
+echo -e "${BLUE}[DEBUG] Running: iw dev${NC}"
+iw dev 2>&1 || echo -e "${RED}iw command failed${NC}"
+echo ""
 
 # Get all WiFi interfaces with their MAC addresses
 declare -A WIFI_MACS
@@ -194,17 +197,29 @@ declare -A WIFI_DRIVERS
 
 while IFS= read -r iface; do
     if [ -n "$iface" ]; then
+        echo -e "${BLUE}[DEBUG] Processing interface: $iface${NC}"
+        
         MAC=$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo "unknown")
+        echo -e "${BLUE}[DEBUG]   MAC: $MAC${NC}"
+        
         DRIVER=""
         if [ -d "/sys/class/net/$iface/device/driver" ]; then
             DRIVER=$(readlink "/sys/class/net/$iface/device/driver" 2>/dev/null | xargs basename)
+            echo -e "${BLUE}[DEBUG]   Driver path: /sys/class/net/$iface/device/driver${NC}"
+            echo -e "${BLUE}[DEBUG]   Driver: $DRIVER${NC}"
+        else
+            echo -e "${YELLOW}[DEBUG]   No driver directory found${NC}"
         fi
+        
         WIFI_MACS[$iface]=$MAC
         WIFI_DRIVERS[$iface]=$DRIVER
     fi
 done < <(iw dev 2>/dev/null | grep Interface | awk '{print $2}')
 
 WIFI_COUNT=${#WIFI_MACS[@]}
+echo ""
+echo -e "${BLUE}[DEBUG] Total WiFi interfaces found: $WIFI_COUNT${NC}"
+echo ""
 
 if [ "$WIFI_COUNT" -eq 0 ]; then
     echo -e "${RED}No WiFi adapters detected!${NC}"
@@ -212,6 +227,7 @@ if [ "$WIFI_COUNT" -eq 0 ]; then
     echo ""
 else
     echo -e "${BLUE}Detected $WIFI_COUNT WiFi adapter(s):${NC}"
+    echo ""
     
     ONBOARD_MAC=""
     EXTERNAL_MACS=()
@@ -220,26 +236,31 @@ else
         MAC=${WIFI_MACS[$iface]}
         DRIVER=${WIFI_DRIVERS[$iface]}
         
-        echo -e "  - ${GREEN}$iface${NC}: $MAC ${DRIVER:+($DRIVER)}"
+        echo -e "  ${GREEN}Interface: $iface${NC}"
+        echo -e "    MAC:    $MAC"
+        echo -e "    Driver: ${DRIVER:-<none>}"
         
         # Identify onboard WiFi (brcmfmac = Broadcom onboard)
         if [[ "$DRIVER" == "brcmfmac" ]] || [[ "$DRIVER" == *"bcm"* ]]; then
             ONBOARD_MAC=$MAC
-            echo -e "    ${BLUE}→ Onboard WiFi (will manage your connection)${NC}"
+            echo -e "    ${BLUE}Type:   ONBOARD (will be managed by NetworkManager)${NC}"
         else
             EXTERNAL_MACS+=("$MAC")
-            echo -e "    ${YELLOW}→ External adapter (for pentesting)${NC}"
+            echo -e "    ${YELLOW}Type:   EXTERNAL (will be ignored for pentesting)${NC}"
         fi
+        echo ""
     done
-    echo ""
     
     # Configure NetworkManager to ignore external adapters by MAC
     if [ ${#EXTERNAL_MACS[@]} -gt 0 ]; then
         print_status "Configuring NetworkManager to ignore external adapters..."
         
+        echo -e "${BLUE}[DEBUG] Building MAC list for unmanaged devices${NC}"
+        
         # Build MAC list for unmanaged devices
         MAC_LIST=""
         for mac in "${EXTERNAL_MACS[@]}"; do
+            echo -e "${BLUE}[DEBUG]   Adding MAC: $mac${NC}"
             if [ -z "$MAC_LIST" ]; then
                 MAC_LIST="mac:$mac"
             else
@@ -247,33 +268,57 @@ else
             fi
         done
         
+        echo -e "${BLUE}[DEBUG] Final MAC_LIST: $MAC_LIST${NC}"
+        echo ""
+        
         NMCONF="/etc/NetworkManager/NetworkManager.conf"
         
         if [ -f "$NMCONF" ]; then
+            echo -e "${BLUE}[DEBUG] NetworkManager.conf exists${NC}"
+            
             # Backup
             if [ ! -f "${NMCONF}.pendonn-backup" ]; then
                 cp "$NMCONF" "${NMCONF}.pendonn-backup"
+                echo -e "${BLUE}[DEBUG] Created backup${NC}"
             fi
             
+            echo -e "${BLUE}[DEBUG] Current NetworkManager.conf:${NC}"
+            cat "$NMCONF"
+            echo ""
+            
             # Remove old interface-name based config if exists
+            echo -e "${BLUE}[DEBUG] Removing old interface-name based config${NC}"
             sed -i '/unmanaged-devices=interface-name:wlan/d' "$NMCONF"
             
             # Add MAC-based unmanaged devices
             if ! grep -q "unmanaged-devices=mac:" "$NMCONF"; then
+                echo -e "${BLUE}[DEBUG] Adding new MAC-based unmanaged-devices${NC}"
+                
                 if grep -q "^\[keyfile\]" "$NMCONF"; then
+                    echo -e "${BLUE}[DEBUG] [keyfile] section exists, adding to it${NC}"
                     # Add to existing [keyfile] section
                     sed -i "/^\[keyfile\]/a unmanaged-devices=$MAC_LIST" "$NMCONF"
                 else
+                    echo -e "${BLUE}[DEBUG] Creating [keyfile] section${NC}"
                     # Create [keyfile] section
                     echo "" >> "$NMCONF"
                     echo "[keyfile]" >> "$NMCONF"
                     echo "unmanaged-devices=$MAC_LIST" >> "$NMCONF"
                 fi
+                
+                echo ""
+                echo -e "${BLUE}[DEBUG] Updated NetworkManager.conf:${NC}"
+                cat "$NMCONF"
+                echo ""
+                
                 print_success "External adapters will be ignored by NetworkManager"
                 echo -e "${BLUE}Unmanaged MACs: ${EXTERNAL_MACS[*]}${NC}"
             else
+                echo -e "${YELLOW}[DEBUG] MAC-based config already exists${NC}"
                 print_success "NetworkManager already configured"
             fi
+        else
+            echo -e "${RED}[DEBUG] NetworkManager.conf not found at $NMCONF${NC}"
         fi
         
         # Also configure dhcpcd if present
@@ -306,21 +351,56 @@ echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}Network Configuration Complete (MAC Address Based)${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+if [ -n "$ONBOARD_MAC" ]; then
+    echo -e "${BLUE}Onboard WiFi:${NC}"
+    echo -e "  MAC:    $ONBOARD_MAC"
+    echo -e "  Status: ${GREEN}Will be MANAGED by NetworkManager${NC}"
+    echo -e "  Usage:  Your SSH/management connection"
+else
+    echo -e "${YELLOW}Warning: Could not identify onboard WiFi!${NC}"
+    echo -e "${YELLOW}All WiFi adapters will be managed by NetworkManager${NC}"
+fi
+echo ""
+
+if [ ${#EXTERNAL_MACS[@]} -gt 0 ]; then
+    echo -e "${BLUE}External WiFi Adapters:${NC}"
+    for mac in "${EXTERNAL_MACS[@]}"; do
+        echo -e "  MAC:    $mac"
+        echo -e "  Status: ${YELLOW}Will be IGNORED by NetworkManager${NC}"
+        echo -e "  Usage:  Available for pentesting (airmon-ng, etc.)"
+        echo ""
+    done
+else
+    echo -e "${YELLOW}No external WiFi adapters detected${NC}"
+    echo -e "${YELLOW}Add them later and run install again${NC}"
+    echo ""
+fi
+
 echo -e "${BLUE}Strategy:${NC}"
 echo -e "  ✓ Using MAC addresses (stable, won't change)"
-echo -e "  ✓ Onboard WiFi: Managed by NetworkManager (your SSH connection)"
-echo -e "  ✓ External adapters: Ignored by NetworkManager (for pentesting)"
+echo -e "  ✓ No interface name dependencies (wlan0/wlan1/wlan2)"
 echo ""
 
 # Get current WiFi connection
 CURRENT_SSID=$(iwgetid -r 2>/dev/null || nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d':' -f2 2>/dev/null || echo "")
 
 if [ -n "$CURRENT_SSID" ]; then
-    echo -e "${GREEN}Current WiFi: $CURRENT_SSID${NC}"
-    echo -e "${GREEN}This will keep working after reboot!${NC}"
+    echo -e "${GREEN}✓ Current WiFi: $CURRENT_SSID${NC}"
+    echo -e "${GREEN}✓ This will keep working after reboot!${NC}"
 else
-    echo -e "${YELLOW}No active WiFi - connect after installation${NC}"
+    echo -e "${YELLOW}! No active WiFi connection${NC}"
+    echo -e "${YELLOW}! Connect after installation completes${NC}"
 fi
+echo ""
+
+echo -e "${BLUE}[DEBUG] After reboot, NetworkManager will:${NC}"
+if [ -n "$ONBOARD_MAC" ]; then
+    echo -e "  • See device with MAC $ONBOARD_MAC → MANAGE IT"
+fi
+for mac in "${EXTERNAL_MACS[@]}"; do
+    echo -e "  • See device with MAC $mac → IGNORE IT"
+done
 echo ""
 
 # Ask about WiFi driver installation
