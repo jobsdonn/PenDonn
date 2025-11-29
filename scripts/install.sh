@@ -181,88 +181,145 @@ fi
 print_success "System dependencies installed"
 
 # ============================================================================
-# Configure Network for PenDonn (MINIMAL - Don't break working WiFi!)
+# Configure Network for PenDonn (MAC Address Based - STABLE!)
 # ============================================================================
-print_status "Checking network configuration..."
+print_status "Detecting WiFi adapters by MAC address..."
 
-echo -e "${YELLOW}IMPORTANT: We will NOT touch your WiFi settings!${NC}"
-echo -e "${YELLOW}Your current WiFi connection will keep working.${NC}"
+echo -e "${YELLOW}Using MAC addresses for stable identification${NC}"
 echo ""
 
-# Detect WiFi interfaces
-WIFI_INTERFACES=($(iw dev 2>/dev/null | grep Interface | awk '{print $2}' || true))
-WIFI_COUNT=${#WIFI_INTERFACES[@]}
+# Get all WiFi interfaces with their MAC addresses
+declare -A WIFI_MACS
+declare -A WIFI_DRIVERS
 
-echo -e "${BLUE}Detected WiFi interfaces: ${WIFI_COUNT}${NC}"
-for iface in "${WIFI_INTERFACES[@]}"; do
-    echo -e "  - $iface"
-done
-echo ""
+while IFS= read -r iface; do
+    if [ -n "$iface" ]; then
+        MAC=$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo "unknown")
+        DRIVER=""
+        if [ -d "/sys/class/net/$iface/device/driver" ]; then
+            DRIVER=$(readlink "/sys/class/net/$iface/device/driver" 2>/dev/null | xargs basename)
+        fi
+        WIFI_MACS[$iface]=$MAC
+        WIFI_DRIVERS[$iface]=$DRIVER
+    fi
+done < <(iw dev 2>/dev/null | grep Interface | awk '{print $2}')
 
-# ONLY configure NetworkManager if we have external adapters
-# Don't do anything if only built-in WiFi exists
-if [ "$WIFI_COUNT" -gt 1 ]; then
-    print_status "Configuring NetworkManager to ignore pentesting adapters..."
+WIFI_COUNT=${#WIFI_MACS[@]}
+
+if [ "$WIFI_COUNT" -eq 0 ]; then
+    echo -e "${RED}No WiFi adapters detected!${NC}"
+    echo -e "${YELLOW}Skipping WiFi configuration${NC}"
+    echo ""
+else
+    echo -e "${BLUE}Detected $WIFI_COUNT WiFi adapter(s):${NC}"
     
-    NMCONF="/etc/NetworkManager/NetworkManager.conf"
+    ONBOARD_MAC=""
+    EXTERNAL_MACS=()
     
-    if [ -f "$NMCONF" ]; then
-        # Backup once if not already backed up
-        if [ ! -f "${NMCONF}.pendonn-backup" ]; then
-            cp "$NMCONF" "${NMCONF}.pendonn-backup"
+    for iface in "${!WIFI_MACS[@]}"; do
+        MAC=${WIFI_MACS[$iface]}
+        DRIVER=${WIFI_DRIVERS[$iface]}
+        
+        echo -e "  - ${GREEN}$iface${NC}: $MAC ${DRIVER:+($DRIVER)}"
+        
+        # Identify onboard WiFi (brcmfmac = Broadcom onboard)
+        if [[ "$DRIVER" == "brcmfmac" ]] || [[ "$DRIVER" == *"bcm"* ]]; then
+            ONBOARD_MAC=$MAC
+            echo -e "    ${BLUE}→ Onboard WiFi (will manage your connection)${NC}"
+        else
+            EXTERNAL_MACS+=("$MAC")
+            echo -e "    ${YELLOW}→ External adapter (for pentesting)${NC}"
+        fi
+    done
+    echo ""
+    
+    # Configure NetworkManager to ignore external adapters by MAC
+    if [ ${#EXTERNAL_MACS[@]} -gt 0 ]; then
+        print_status "Configuring NetworkManager to ignore external adapters..."
+        
+        # Build MAC list for unmanaged devices
+        MAC_LIST=""
+        for mac in "${EXTERNAL_MACS[@]}"; do
+            if [ -z "$MAC_LIST" ]; then
+                MAC_LIST="mac:$mac"
+            else
+                MAC_LIST="$MAC_LIST;mac:$mac"
+            fi
+        done
+        
+        NMCONF="/etc/NetworkManager/NetworkManager.conf"
+        
+        if [ -f "$NMCONF" ]; then
+            # Backup
+            if [ ! -f "${NMCONF}.pendonn-backup" ]; then
+                cp "$NMCONF" "${NMCONF}.pendonn-backup"
+            fi
+            
+            # Remove old interface-name based config if exists
+            sed -i '/unmanaged-devices=interface-name:wlan/d' "$NMCONF"
+            
+            # Add MAC-based unmanaged devices
+            if ! grep -q "unmanaged-devices=mac:" "$NMCONF"; then
+                if grep -q "^\[keyfile\]" "$NMCONF"; then
+                    # Add to existing [keyfile] section
+                    sed -i "/^\[keyfile\]/a unmanaged-devices=$MAC_LIST" "$NMCONF"
+                else
+                    # Create [keyfile] section
+                    echo "" >> "$NMCONF"
+                    echo "[keyfile]" >> "$NMCONF"
+                    echo "unmanaged-devices=$MAC_LIST" >> "$NMCONF"
+                fi
+                print_success "External adapters will be ignored by NetworkManager"
+                echo -e "${BLUE}Unmanaged MACs: ${EXTERNAL_MACS[*]}${NC}"
+            else
+                print_success "NetworkManager already configured"
+            fi
         fi
         
-        # Only add unmanaged-devices if not already present
-        if ! grep -q "unmanaged-devices.*wlan1.*wlan2" "$NMCONF"; then
-            # Check if [keyfile] section exists
-            if grep -q "^\[keyfile\]" "$NMCONF"; then
-                # Add to existing [keyfile] section
-                sed -i '/^\[keyfile\]/a unmanaged-devices=interface-name:wlan1;interface-name:wlan2' "$NMCONF"
-            else
-                # Create [keyfile] section at the end
-                echo "" >> "$NMCONF"
-                echo "[keyfile]" >> "$NMCONF"
-                echo "unmanaged-devices=interface-name:wlan1;interface-name:wlan2" >> "$NMCONF"
+        # Also configure dhcpcd if present
+        if [ -f /etc/dhcpcd.conf ]; then
+            if ! grep -q "# PenDonn: External WiFi adapters" /etc/dhcpcd.conf; then
+                cp /etc/dhcpcd.conf /etc/dhcpcd.conf.pendonn-backup
+                echo "" >> /etc/dhcpcd.conf
+                echo "# PenDonn: External WiFi adapters (by MAC)" >> /etc/dhcpcd.conf
+                for mac in "${EXTERNAL_MACS[@]}"; do
+                    echo "denyinterfaces $mac" >> /etc/dhcpcd.conf
+                done
+                print_success "dhcpcd configured"
             fi
-            print_success "NetworkManager will ignore wlan1/wlan2 (pentesting adapters)"
-            echo -e "${YELLOW}Note: This takes effect after reboot${NC}"
-        else
-            print_success "NetworkManager already configured"
         fi
+    else
+        echo -e "${YELLOW}No external adapters detected${NC}"
+        echo -e "${YELLOW}Only onboard WiFi found - it will handle your connection${NC}"
+        echo -e "${YELLOW}Add external adapters later and run install again${NC}"
     fi
-else
-    echo -e "${YELLOW}Only 1 WiFi interface detected - skipping NetworkManager config${NC}"
-    echo -e "${YELLOW}(You can configure this later when you add external WiFi adapters)${NC}"
-fi
-
-# Configure dhcpcd to ignore wlan1/wlan2
-if [ -f /etc/dhcpcd.conf ]; then
-    if ! grep -q "denyinterfaces wlan1 wlan2" /etc/dhcpcd.conf; then
-        cp /etc/dhcpcd.conf /etc/dhcpcd.conf.pendonn-backup
-        echo "" >> /etc/dhcpcd.conf
-        echo "# PenDonn: Don't manage pentesting interfaces" >> /etc/dhcpcd.conf
-        echo "denyinterfaces wlan1 wlan2" >> /etc/dhcpcd.conf
-        print_success "dhcpcd configured to ignore pentesting adapters"
+    
+    echo ""
+    if [ -n "$ONBOARD_MAC" ]; then
+        echo -e "${GREEN}✓ Onboard WiFi ($ONBOARD_MAC) will stay managed by NetworkManager${NC}"
+        echo -e "${GREEN}✓ Your WiFi connection will keep working!${NC}"
     fi
 fi
 
+
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}Network Configuration Complete${NC}"
+echo -e "${GREEN}Network Configuration Complete (MAC Address Based)${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Changes made:${NC}"
-echo -e "  ✓ wlan1/wlan2 reserved for pentesting (not managed by system)"
-echo -e "  ✓ wlan0 (built-in WiFi) - LEFT ALONE (keeps working!)"
-echo -e "  ✓ NO other WiFi settings changed"
+echo -e "${BLUE}Strategy:${NC}"
+echo -e "  ✓ Using MAC addresses (stable, won't change)"
+echo -e "  ✓ Onboard WiFi: Managed by NetworkManager (your SSH connection)"
+echo -e "  ✓ External adapters: Ignored by NetworkManager (for pentesting)"
 echo ""
 
-# Get current WiFi connection for display
+# Get current WiFi connection
 CURRENT_SSID=$(iwgetid -r 2>/dev/null || nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d':' -f2 2>/dev/null || echo "")
 
 if [ -n "$CURRENT_SSID" ]; then
-    echo -e "${GREEN}Current WiFi: $CURRENT_SSID (will keep working after reboot!)${NC}"
+    echo -e "${GREEN}Current WiFi: $CURRENT_SSID${NC}"
+    echo -e "${GREEN}This will keep working after reboot!${NC}"
 else
-    echo -e "${YELLOW}No active WiFi - connect after installation completes${NC}"
+    echo -e "${YELLOW}No active WiFi - connect after installation${NC}"
 fi
 echo ""
 
