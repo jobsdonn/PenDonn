@@ -180,73 +180,59 @@ fi
 
 print_success "System dependencies installed"
 
-# IMPORTANT: Configure WiFi protection BEFORE installing drivers
-# This prevents external drivers from breaking built-in WiFi
-print_status "Configuring WiFi protection (before driver installation)..."
+# ============================================================================
+# Configure NetworkManager for WiFi Stability (Ragnar approach)
+# ============================================================================
+print_status "Configuring NetworkManager for stable WiFi..."
 
-# Detect built-in WiFi by driver (not by interface name!)
-BUILTIN_MAC=""
-BUILTIN_IFACE=""
-
-echo -e "${BLUE}Detecting built-in WiFi adapter...${NC}"
-for iface in /sys/class/net/wlan*; do
-    if [ -e "$iface" ]; then
-        IFACE_NAME=$(basename "$iface")
-        DRIVER=$(readlink "$iface/device/driver" 2>/dev/null | xargs basename 2>/dev/null || echo "unknown")
-        MAC=$(cat "$iface/address" 2>/dev/null)
-        
-        echo -e "  Checking $IFACE_NAME: driver=$DRIVER"
-        
-        # Raspberry Pi built-in WiFi uses brcmfmac driver
-        if [[ "$DRIVER" == "brcmfmac" ]] || [[ "$DRIVER" == "brcmutil" ]]; then
-            BUILTIN_MAC="$MAC"
-            BUILTIN_IFACE="$IFACE_NAME"
-            echo -e "${GREEN}  ✓ Found built-in WiFi: $IFACE_NAME (MAC: $MAC)${NC}"
-            break
-        fi
-    fi
-done
-
-if [ -n "$BUILTIN_MAC" ]; then
-    echo -e "${GREEN}Built-in WiFi detected: $BUILTIN_IFACE (MAC: $BUILTIN_MAC)${NC}"
-    
-    echo -e "${BLUE}Creating udev rules for persistent interface naming...${NC}"
-    cat > /etc/udev/rules.d/70-persistent-wifi.rules << EOF
-# PenDonn - Persistent WiFi Interface Naming
-# Created BEFORE driver installation to prevent WiFi loss
-# Built-in WiFi is always wlan0 (management interface)
-SUBSYSTEM=="net", ACTION=="add", ATTR{address}=="$BUILTIN_MAC", NAME="wlan0"
-
-# External USB WiFi adapters become wlan1 and wlan2
-# These will be used for pentesting (monitor/attack interfaces)
-EOF
-    print_success "udev rules created (wlan0 locked to $BUILTIN_MAC)"
-else
-    print_warning "Built-in WiFi not detected - WiFi protection skipped"
-    echo -e "${YELLOW}This is normal if you're using only external adapters${NC}"
+# Backup existing config
+if [ -f /etc/NetworkManager/NetworkManager.conf ]; then
+    cp /etc/NetworkManager/NetworkManager.conf /etc/NetworkManager/NetworkManager.conf.backup-$(date +%Y%m%d)
 fi
 
-# Configure NetworkManager to not manage external interfaces
-if systemctl is-active --quiet NetworkManager; then
-    echo -e "${BLUE}Configuring NetworkManager to ignore wlan1/wlan2...${NC}"
-    
-    if [ -f /etc/NetworkManager/NetworkManager.conf ]; then
-        cp /etc/NetworkManager/NetworkManager.conf /etc/NetworkManager/NetworkManager.conf.backup
-        
-        if grep -q "^\[keyfile\]" /etc/NetworkManager/NetworkManager.conf; then
-            if ! grep -q "unmanaged-devices" /etc/NetworkManager/NetworkManager.conf; then
-                sed -i '/^\[keyfile\]/a unmanaged-devices=interface-name:wlan1;interface-name:wlan2' /etc/NetworkManager/NetworkManager.conf
-            fi
-        else
-            echo "" >> /etc/NetworkManager/NetworkManager.conf
-            echo "[keyfile]" >> /etc/NetworkManager/NetworkManager.conf
-            echo "unmanaged-devices=interface-name:wlan1;interface-name:wlan2" >> /etc/NetworkManager/NetworkManager.conf
-        fi
-        print_success "NetworkManager configured"
-    fi
-elif [ -f /etc/dhcpcd.conf ]; then
-    echo -e "${BLUE}Configuring dhcpcd to ignore wlan1/wlan2...${NC}"
-    
+# Create clean, working configuration (based on Ragnar)
+cat > /etc/NetworkManager/NetworkManager.conf << 'EOFNM'
+[main]
+plugins=ifupdown,keyfile
+dhcp=dhclient
+dns=default
+
+[device]
+# Don't randomize MAC during scans - this disrupts connections!
+wifi.scan-rand-mac-address=no
+# Use wpa_supplicant backend
+wifi.backend=wpa_supplicant
+
+[connection]
+# Disable WiFi power save (can cause disconnects)
+wifi.powersave=2
+# Don't change MAC addresses
+wifi.cloned-mac-address=preserve
+
+[keyfile]
+# Don't manage wlan1/wlan2 - those are for pentesting
+unmanaged-devices=interface-name:wlan1;interface-name:wlan2
+EOFNM
+
+print_success "NetworkManager configured"
+
+# Stop and disable ModemManager (causes WiFi issues)
+if systemctl is-active --quiet ModemManager; then
+    echo -e "${YELLOW}Disabling ModemManager (causes WiFi disconnects)...${NC}"
+    systemctl stop ModemManager
+    systemctl disable ModemManager
+    systemctl mask ModemManager
+    print_success "ModemManager disabled"
+fi
+
+# Ensure rfkill isn't blocking WiFi
+if command -v rfkill >/dev/null 2>&1; then
+    rfkill unblock wifi
+    print_success "WiFi unblocked via rfkill"
+fi
+
+# Configure dhcpcd as fallback (if no NetworkManager)
+if [ -f /etc/dhcpcd.conf ]; then
     if ! grep -q "denyinterfaces wlan1 wlan2" /etc/dhcpcd.conf; then
         cp /etc/dhcpcd.conf /etc/dhcpcd.conf.backup
         echo "" >> /etc/dhcpcd.conf
@@ -258,126 +244,27 @@ fi
 
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}WiFi Protection Configured${NC}"
+echo -e "${GREEN}WiFi Management Configured (Simple & Stable)${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-if [ -n "$BUILTIN_MAC" ]; then
-    echo -e "${BLUE}Protection applied:${NC}"
-    echo -e "  ✓ wlan0 locked to built-in WiFi (MAC: $BUILTIN_MAC)"
-    echo -e "  ✓ wlan1/wlan2 reserved for external adapters"
-    echo -e "  ✓ Network manager configured to ignore wlan1/wlan2"
-    echo ""
-    echo -e "${YELLOW}This ensures your built-in WiFi stays connected after reboot!${NC}"
-else
-    echo -e "${YELLOW}No built-in WiFi detected - using external adapters only${NC}"
-fi
+echo -e "${BLUE}Approach:${NC}"
+echo -e "  ✓ NetworkManager manages wlan0 (built-in WiFi) automatically"
+echo -e "  ✓ wlan1/wlan2 (external adapters) ignored by NetworkManager"
+echo -e "  ✓ NO udev rules (no race conditions!)"
+echo -e "  ✓ NO custom WiFi services (let system handle it)"
+echo -e "  ✓ ModemManager disabled (prevents interference)"
+echo ""
+echo -e "${YELLOW}WiFi will reconnect automatically on boot using NetworkManager${NC}"
 echo ""
 
-# Configure automatic WiFi reconnection on boot
-if [ -n "$BUILTIN_MAC" ]; then
-    echo -e "${BLUE}Setting up automatic WiFi reconnection service...${NC}"
+# Get current WiFi connection for display
+CURRENT_SSID=$(iwgetid -r 2>/dev/null || nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d':' -f2 2>/dev/null || echo "")
 
-    # Get current WiFi connection details
-    CURRENT_SSID=$(iwgetid -r 2>/dev/null || nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d':' -f2 2>/dev/null || echo "")
-
-    if [ -n "$CURRENT_SSID" ]; then
-        echo -e "${GREEN}Current WiFi: $CURRENT_SSID${NC}"
-        read -p "Save this WiFi for automatic reconnection on boot? (yes/no) [yes]: " SAVE_WIFI
-        SAVE_WIFI=${SAVE_WIFI:-yes}
-        
-        if [ "$SAVE_WIFI" = "yes" ]; then
-        # Create WiFi reconnection script
-        cat > /usr/local/bin/pendonn-wifi-keeper.sh << 'EOFWIFI'
-#!/bin/bash
-# PenDonn WiFi Keeper - Ensures wlan0 stays connected
-
-INTERFACE="wlan0"
-MAX_RETRIES=10
-RETRY_DELAY=5
-
-# Wait for interface to exist
-for i in $(seq 1 $MAX_RETRIES); do
-    if [ -e "/sys/class/net/$INTERFACE" ]; then
-        echo "Interface $INTERFACE found"
-        break
-    fi
-    echo "Waiting for $INTERFACE... ($i/$MAX_RETRIES)"
-    sleep $RETRY_DELAY
-done
-
-# Check if we have NetworkManager
-if systemctl is-active --quiet NetworkManager; then
-    echo "Using NetworkManager for WiFi management"
-    
-    # Wait for NetworkManager to be ready
-    sleep 5
-    
-    # Check if already connected
-    if nmcli -t -f DEVICE,STATE dev | grep "^$INTERFACE:connected" > /dev/null; then
-        echo "Already connected to WiFi"
-        exit 0
-    fi
-    
-    # Try to reconnect
-    echo "Attempting WiFi reconnection..."
-    nmcli device connect $INTERFACE
-    
-elif command -v wpa_supplicant > /dev/null; then
-    echo "Using wpa_supplicant for WiFi management"
-    
-    # Check if wlan0 is up
-    if ! ip link show $INTERFACE | grep -q "UP"; then
-        ip link set $INTERFACE up
-    fi
-    
-    # Wait for connection
-    for i in $(seq 1 $MAX_RETRIES); do
-        if iwgetid -r > /dev/null 2>&1; then
-            echo "WiFi connected"
-            exit 0
-        fi
-        echo "Waiting for WiFi connection... ($i/$MAX_RETRIES)"
-        sleep $RETRY_DELAY
-    done
-fi
-
-echo "WiFi keeper completed"
-EOFWIFI
-
-        chmod +x /usr/local/bin/pendonn-wifi-keeper.sh
-        
-        # Create systemd service for WiFi keeper
-        cat > /etc/systemd/system/pendonn-wifi-keeper.service << EOFSERVICE
-[Unit]
-Description=PenDonn WiFi Keeper
-After=network-pre.target
-Before=network.target
-Wants=network-pre.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/pendonn-wifi-keeper.sh
-RemainAfterExit=yes
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOFSERVICE
-
-        # Enable the service
-        systemctl daemon-reload
-        systemctl enable pendonn-wifi-keeper.service
-        
-        print_success "WiFi keeper service installed (will reconnect wlan0 on boot)"
-        fi
-    else
-        print_warning "No active WiFi connection detected - WiFi keeper not configured"
-        echo -e "${YELLOW}You can manually configure WiFi reconnection later if needed${NC}"
-    fi
+if [ -n "$CURRENT_SSID" ]; then
+    echo -e "${GREEN}Current WiFi connected: $CURRENT_SSID${NC}"
+    echo -e "${YELLOW}NetworkManager will automatically reconnect to this network on boot${NC}"
 else
-    echo -e "${YELLOW}Skipping WiFi keeper setup (no built-in WiFi detected)${NC}"
+    echo -e "${YELLOW}No active WiFi connection - connect manually after installation${NC}"
 fi
-
 echo ""
 
 # Ask about WiFi driver installation
@@ -600,42 +487,6 @@ fi
 
 echo -e "${GREEN}✓ Found project root: $SCRIPT_DIR${NC}"
 echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
-
-# Install automatic WiFi interface fixer (runs on every boot)
-# Do this AFTER we know SCRIPT_DIR is valid
-print_status "Installing automatic WiFi interface fixer..."
-
-if [ -f "$SCRIPT_DIR/scripts/auto-fix-wifi-interfaces.sh" ]; then
-    cp "$SCRIPT_DIR/scripts/auto-fix-wifi-interfaces.sh" /usr/local/bin/pendonn-wifi-autofix.sh
-    chmod +x /usr/local/bin/pendonn-wifi-autofix.sh
-
-    cat > /etc/systemd/system/pendonn-wifi-autofix.service << 'EOFAUTOFIX'
-[Unit]
-Description=PenDonn Auto WiFi Interface Fixer
-After=network-pre.target
-Before=network.target systemd-udev-settle.service
-DefaultDependencies=no
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/pendonn-wifi-autofix.sh
-RemainAfterExit=yes
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=sysinit.target
-EOFAUTOFIX
-
-    systemctl daemon-reload
-    # DON'T enable - only for manual recovery
-    # systemctl enable pendonn-wifi-autofix.service
-    print_success "Auto-fix service installed (available for manual recovery)"
-    echo -e "${YELLOW}Note: Auto-fix runs only when needed, not automatically${NC}"
-    echo -e "${YELLOW}Manual trigger: sudo systemctl start pendonn-wifi-autofix${NC}"
-else
-    print_warning "auto-fix-wifi-interfaces.sh not found - skipping"
-fi
 
 # Backup existing data if installation exists
 if [ -d "$INSTALL_DIR" ]; then
