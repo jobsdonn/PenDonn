@@ -183,35 +183,56 @@ print_success "System dependencies installed"
 # ============================================================================
 # Configure Network for PenDonn (MINIMAL - Don't break working WiFi!)
 # ============================================================================
-print_status "Configuring network for pentesting adapters..."
+print_status "Checking network configuration..."
 
-# ONLY configure NetworkManager to ignore wlan1/wlan2
-# DON'T touch any other settings - leave working WiFi alone!
-NMCONF="/etc/NetworkManager/NetworkManager.conf"
+echo -e "${YELLOW}IMPORTANT: We will NOT touch your WiFi settings!${NC}"
+echo -e "${YELLOW}Your current WiFi connection will keep working.${NC}"
+echo ""
 
-# Check if NetworkManager exists
-if [ -f "$NMCONF" ]; then
-    # Backup once if not already backed up
-    if [ ! -f "${NMCONF}.pendonn-backup" ]; then
-        cp "$NMCONF" "${NMCONF}.pendonn-backup"
-    fi
+# Detect WiFi interfaces
+WIFI_INTERFACES=($(iw dev 2>/dev/null | grep Interface | awk '{print $2}' || true))
+WIFI_COUNT=${#WIFI_INTERFACES[@]}
+
+echo -e "${BLUE}Detected WiFi interfaces: ${WIFI_COUNT}${NC}"
+for iface in "${WIFI_INTERFACES[@]}"; do
+    echo -e "  - $iface"
+done
+echo ""
+
+# ONLY configure NetworkManager if we have external adapters
+# Don't do anything if only built-in WiFi exists
+if [ "$WIFI_COUNT" -gt 1 ]; then
+    print_status "Configuring NetworkManager to ignore pentesting adapters..."
     
-    # Only add unmanaged-devices if not already present
-    if ! grep -q "unmanaged-devices.*wlan1.*wlan2" "$NMCONF"; then
-        # Check if [keyfile] section exists
-        if grep -q "^\[keyfile\]" "$NMCONF"; then
-            # Add to existing [keyfile] section
-            sed -i '/^\[keyfile\]/a unmanaged-devices=interface-name:wlan1;interface-name:wlan2' "$NMCONF"
-        else
-            # Create [keyfile] section at the end
-            echo "" >> "$NMCONF"
-            echo "[keyfile]" >> "$NMCONF"
-            echo "unmanaged-devices=interface-name:wlan1;interface-name:wlan2" >> "$NMCONF"
+    NMCONF="/etc/NetworkManager/NetworkManager.conf"
+    
+    if [ -f "$NMCONF" ]; then
+        # Backup once if not already backed up
+        if [ ! -f "${NMCONF}.pendonn-backup" ]; then
+            cp "$NMCONF" "${NMCONF}.pendonn-backup"
         fi
-        print_success "NetworkManager will ignore wlan1/wlan2 (pentesting adapters)"
-    else
-        print_success "NetworkManager already configured for pentesting adapters"
+        
+        # Only add unmanaged-devices if not already present
+        if ! grep -q "unmanaged-devices.*wlan1.*wlan2" "$NMCONF"; then
+            # Check if [keyfile] section exists
+            if grep -q "^\[keyfile\]" "$NMCONF"; then
+                # Add to existing [keyfile] section
+                sed -i '/^\[keyfile\]/a unmanaged-devices=interface-name:wlan1;interface-name:wlan2' "$NMCONF"
+            else
+                # Create [keyfile] section at the end
+                echo "" >> "$NMCONF"
+                echo "[keyfile]" >> "$NMCONF"
+                echo "unmanaged-devices=interface-name:wlan1;interface-name:wlan2" >> "$NMCONF"
+            fi
+            print_success "NetworkManager will ignore wlan1/wlan2 (pentesting adapters)"
+            echo -e "${YELLOW}Note: This takes effect after reboot${NC}"
+        else
+            print_success "NetworkManager already configured"
+        fi
     fi
+else
+    echo -e "${YELLOW}Only 1 WiFi interface detected - skipping NetworkManager config${NC}"
+    echo -e "${YELLOW}(You can configure this later when you add external WiFi adapters)${NC}"
 fi
 
 # Configure dhcpcd to ignore wlan1/wlan2
