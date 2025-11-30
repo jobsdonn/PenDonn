@@ -85,27 +85,24 @@ def get_networks():
         # Filter to only show networks seen in the last 5 minutes
         if recent_only:
             from datetime import timedelta
-            from dateutil import parser as date_parser
             cutoff_time = datetime.now() - timedelta(minutes=5)
             
             filtered_networks = []
             for n in networks:
                 try:
-                    # Try multiple date parsing methods
-                    last_seen_str = n['last_seen']
-                    try:
-                        last_seen = datetime.fromisoformat(last_seen_str)
-                    except:
-                        # Fallback: try parsing as SQLite datetime format
-                        last_seen = datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S')
+                    # SQLite stores as: '2025-11-30 19:27:21'
+                    last_seen = datetime.strptime(n['last_seen'], '%Y-%m-%d %H:%M:%S')
                     
                     if last_seen > cutoff_time:
                         filtered_networks.append(n)
+                    else:
+                        logger.debug(f"Filtering out {n['ssid']} - last seen {n['last_seen']}")
                 except Exception as e:
-                    logger.debug(f"Error parsing date for network {n.get('ssid', 'unknown')}: {e}")
-                    # If we can't parse the date, include it anyway to avoid hiding networks
+                    logger.error(f"Error parsing date for {n.get('ssid', 'unknown')}: {e} - Value: {n.get('last_seen')}")
+                    # Include network if date parsing fails
                     filtered_networks.append(n)
             
+            logger.info(f"Filtered networks: {len(filtered_networks)}/{len(networks)} networks within 5 minutes")
             networks = filtered_networks
         
         return jsonify({
@@ -114,6 +111,8 @@ def get_networks():
         })
     except Exception as e:
         logger.error(f"Get networks error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
