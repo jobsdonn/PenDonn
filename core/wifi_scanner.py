@@ -492,8 +492,16 @@ class WiFiScanner:
                 pass
         
         if success:
-            # Add to database
+            # Get network_id from database (network should already exist from scan)
             network_id = self.networks[bssid].get('id')
+            
+            # If not in memory, query database
+            if not network_id:
+                network = self.db.get_network_by_bssid(bssid)
+                if network:
+                    network_id = network['id']
+                    self.networks[bssid]['id'] = network_id
+            
             if network_id:
                 self.db.add_handshake(
                     network_id=network_id,
@@ -502,8 +510,9 @@ class WiFiScanner:
                     file_path=capture_info['capture_file'],
                     quality='good'
                 )
-            
-            logger.info(f"✅ Handshake saved: {ssid}")
+                logger.info(f"✅ Handshake saved: {ssid}")
+            else:
+                logger.warning(f"❌ Could not save handshake for {ssid}: network_id not found")
         else:
             # Clean up failed capture file
             try:
