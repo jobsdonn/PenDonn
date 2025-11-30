@@ -340,15 +340,12 @@ class WiFiScanner:
             logger.info(f"⚡ Starting handshake capture: {ssid} CH:{channel}")
             
             # Start airodump-ng to capture handshake
-            # DON'T use --bssid filter as it excludes beacon frames needed for hash conversion
-            # Instead capture all on the channel and filter during verification
-            # --channel: lock to channel
-            # -w: write to file
-            # --essid: filter by ESSID (still captures beacons)
+            # Capture ALL traffic on the channel (no filters!)
+            # Filters exclude critical frames needed for hash conversion
+            # We'll verify the correct handshake was captured using aircrack-ng
             cmd = [
                 'airodump-ng',
                 '--channel', str(channel),
-                '--essid', ssid,
                 '--write', capture_base,
                 '--output-format', 'cap',
                 self.interface
