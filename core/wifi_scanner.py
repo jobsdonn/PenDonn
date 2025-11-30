@@ -113,9 +113,9 @@ class WiFiScanner:
         try:
             logger.info(f"Enabling monitor mode on {interface}...")
             
-            # Kill interfering processes
-            subprocess.run(['airmon-ng', 'check', 'kill'], 
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # DON'T kill interfering processes - this kills NetworkManager and breaks SSH!
+            # subprocess.run(['airmon-ng', 'check', 'kill'], 
+            #              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             # Enable monitor mode
             subprocess.run(['ip', 'link', 'set', interface, 'down'], check=True)
