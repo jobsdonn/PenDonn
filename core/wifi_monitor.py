@@ -240,10 +240,17 @@ class WiFiMonitor:
         """Sniff WiFi packets to discover networks"""
         packet_count = 0
         beacon_count = 0
+        last_log_time = time.time()
         
         def packet_handler(pkt):
-            nonlocal packet_count, beacon_count
+            nonlocal packet_count, beacon_count, last_log_time
             packet_count += 1
+            
+            # Log stats every 10 seconds even if no beacons
+            current_time = time.time()
+            if current_time - last_log_time > 10:
+                logger.info(f"📊 Packet sniffer stats: {packet_count} total packets, {beacon_count} beacons processed")
+                last_log_time = current_time
             
             if not self.running:
                 return
@@ -260,7 +267,9 @@ class WiFiMonitor:
                 elif pkt.haslayer(EAPOL):
                     self._process_eapol(pkt)
             except Exception as e:
-                logger.debug(f"Packet processing error: {e}")
+                logger.error(f"Packet processing error: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
         
         try:
             logger.info(f"Starting packet sniffer on {self.monitor_interface}")
