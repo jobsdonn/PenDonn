@@ -66,13 +66,14 @@ class PenDonn:
         self.plugin_manager.load_plugins()
         
         # Initialize modules based on debug mode
-        logger.info("Initializing WiFi monitor...")
+        logger.info("Initializing WiFi scanner...")
         if self.debug_mode and self.config['debug'].get('mock_wifi', False):
             from core.mock_wifi_monitor import MockWiFiMonitor
             self.wifi_monitor = MockWiFiMonitor(self.config, self.db)
         else:
-            from core.wifi_monitor import WiFiMonitor
-            self.wifi_monitor = WiFiMonitor(self.config, self.db)
+            # Use new airodump-based scanner (more reliable than Scapy)
+            from core.wifi_scanner import WiFiScanner
+            self.wifi_monitor = WiFiScanner(self.config, self.db)
         
         logger.info("Initializing password cracker...")
         if self.debug_mode and self.config['debug'].get('mock_cracking', False):
