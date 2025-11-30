@@ -258,16 +258,21 @@ class WiFiMonitor:
                 self.networks[bssid]['id'] = network_id
                 
                 logger.info(f"✓ Target network: {ssid} ({bssid}) on channel {channel} - {encryption}")
-                
-                # Start handshake capture if WPA/WPA2
-                if 'WPA' in encryption and bssid not in self.active_captures:
-                    logger.info(f"→ Starting handshake capture for {ssid}")
-                    self._start_handshake_capture(bssid, ssid, channel)
-                elif 'WPA' not in encryption:
-                    logger.info(f"⊘ Skipping {ssid} - {encryption} network (no handshake possible)")
-                else:
-                    self.networks[bssid]['last_seen'] = datetime.now()
-                    self.networks[bssid]['signal'] = signal
+            else:
+                # Update existing network
+                self.networks[bssid]['last_seen'] = datetime.now()
+                self.networks[bssid]['signal'] = signal
+                self.networks[bssid]['channel'] = channel
+            
+            # Start handshake capture if WPA/WPA2 and not already capturing
+            if 'WPA' in encryption and bssid not in self.active_captures:
+                logger.info(f"→ Starting handshake capture for {ssid}")
+                self._start_handshake_capture(bssid, ssid, channel)
+            elif 'WPA' not in encryption and bssid not in self.networks or bssid in self.networks and self.networks[bssid].get('last_log_time', 0) < time.time() - 300:
+                # Only log skip message once every 5 minutes to avoid spam
+                logger.info(f"⊘ Skipping {ssid} - {encryption} network (no handshake possible)")
+                if bssid in self.networks:
+                    self.networks[bssid]['last_log_time'] = time.time()
         
         except Exception as e:
             logger.debug(f"Beacon processing error: {e}")
