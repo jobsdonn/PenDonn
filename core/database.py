@@ -147,7 +147,9 @@ class Database:
             ON CONFLICT(bssid) DO UPDATE SET
                 signal_strength = excluded.signal_strength,
                 last_seen = CURRENT_TIMESTAMP,
-                channel = excluded.channel
+                channel = excluded.channel,
+                encryption = excluded.encryption,
+                ssid = excluded.ssid
         ''', (ssid, bssid, channel, encryption, signal_strength))
         
         network_id = cursor.lastrowid

