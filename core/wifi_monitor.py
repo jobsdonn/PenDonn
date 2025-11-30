@@ -367,7 +367,7 @@ class WiFiMonitor:
                 '--bssid', bssid,
                 '--channel', str(channel),
                 '--write', capture_base,
-                '--output-format', 'pcap',
+                '--output-format', 'cap',
                 self.attack_interface
             ]
             
@@ -376,13 +376,24 @@ class WiFiMonitor:
             
             # Wait a moment and check if process started successfully
             time.sleep(2)
-            if process.poll() is not None:
+            poll_result = process.poll()
+            if poll_result is not None:
                 stdout, stderr = process.communicate()
-                logger.error(f"airodump-ng failed to start: {stderr.decode()}")
+                logger.error(f"airodump-ng failed to start (exit code {poll_result}):")
+                logger.error(f"STDOUT: {stdout.decode()}")
+                logger.error(f"STDERR: {stderr.decode()}")
                 return
             
-            # airodump-ng creates files like: basename-01.pcap
-            capture_file = capture_base + '-01.pcap'
+            # airodump-ng creates files like: basename-01.cap
+            capture_file = capture_base + '-01.cap'
+            
+            # Verify process is actually running
+            try:
+                os.kill(process.pid, 0)  # Check if process exists
+                logger.debug(f"airodump-ng process {process.pid} confirmed running")
+            except OSError:
+                logger.error(f"airodump-ng process {process.pid} not found!")
+                return
             
             self.active_captures[bssid] = {
                 'ssid': ssid,
@@ -456,14 +467,25 @@ class WiFiMonitor:
             try:
                 current_time = time.time()
                 
+                if self.active_captures:
+                    logger.debug(f"Monitoring {len(self.active_captures)} active captures")
+                
                 for bssid in list(self.active_captures.keys()):
                     capture_info = self.active_captures[bssid]
                     elapsed = current_time - capture_info['start_time']
                     ssid = capture_info['ssid']
                     
+                    # Check if airodump process is still alive
+                    process = capture_info['process']
+                    if process.poll() is not None:
+                        logger.warning(f"airodump-ng process died for {ssid}! Restarting...")
+                        self._stop_capture(bssid)
+                        # Try to restart (handled by network discovery on next beacon)
+                        continue
+                    
                     # Check periodically for handshake (every 30 seconds after deauth)
-                    if capture_info.get('deauth_sent') and elapsed > 30 and elapsed % 30 < 10:
-                        logger.debug(f"Checking for handshake in {ssid} capture...")
+                    if capture_info.get('deauth_sent') and elapsed > 30 and int(elapsed) % 30 < 10:
+                        logger.info(f"🔍 Checking for handshake in {ssid} capture (elapsed: {int(elapsed)}s)...")
                         if self._verify_handshake(capture_info['capture_file']):
                             logger.info(f"🎯 Handshake captured for {ssid}!")
                             self._finalize_handshake(bssid)
