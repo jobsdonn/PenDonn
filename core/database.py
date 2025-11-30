@@ -172,6 +172,18 @@ class Database:
         conn.close()
         return networks
     
+    def get_network_by_bssid(self, bssid: str) -> Optional[Dict]:
+        """Get network by BSSID"""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM networks WHERE bssid = ?', (bssid,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return dict(row)
+        return None
+    
     def set_whitelist(self, bssid: str, whitelisted: bool):
         """Set whitelist status for a network"""
         conn = self.connect()
