@@ -347,6 +347,57 @@ else
 fi
 
 
+# ============================================================================
+# CRITICAL: Disable WiFi Power Management (fixes 5-second disconnect bug)
+# ============================================================================
+print_status "Disabling WiFi power management (prevents disconnect bug)..."
+
+# Configure NetworkManager to disable power save
+NMCONF="/etc/NetworkManager/NetworkManager.conf"
+if [ -f "$NMCONF" ]; then
+    # Check if [connection] section exists
+    if grep -q "^\[connection\]" "$NMCONF"; then
+        # Add wifi.powersave=2 if not present
+        if ! grep -q "wifi.powersave" "$NMCONF"; then
+            sed -i '/^\[connection\]/a wifi.powersave=2' "$NMCONF"
+        fi
+    else
+        # Create [connection] section
+        echo "" >> "$NMCONF"
+        echo "[connection]" >> "$NMCONF"
+        echo "wifi.powersave=2" >> "$NMCONF"
+    fi
+    print_success "NetworkManager configured to disable WiFi power save"
+fi
+
+# Create systemd service to force power management off at boot
+cat > /etc/systemd/system/wifi-powersave-off.service << 'EOFPOWER'
+[Unit]
+Description=Disable WiFi Power Management
+After=network.target NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/iw dev wlan0 set power_save off
+ExecStartPost=/bin/sleep 2
+ExecStartPost=/usr/sbin/iw dev wlan0 set power_save off
+
+[Install]
+WantedBy=multi-user.target
+EOFPOWER
+
+systemctl daemon-reload
+systemctl enable wifi-powersave-off.service
+print_success "WiFi power management service created and enabled"
+
+# Disable it NOW (if wlan0 exists)
+if ip link show wlan0 >/dev/null 2>&1; then
+    iw dev wlan0 set power_save off 2>/dev/null || true
+    iwconfig wlan0 power off 2>/dev/null || true
+    print_success "WiFi power save disabled on wlan0"
+fi
+
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}Network Configuration Complete (MAC Address Based)${NC}"
