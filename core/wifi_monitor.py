@@ -47,6 +47,12 @@ class WiFiMonitor:
         """Start WiFi monitoring"""
         logger.info("Starting WiFi monitor...")
         
+        # Validate interfaces exist and aren't the management interface
+        if not self._validate_interfaces():
+            logger.error("Cannot start WiFi monitor - interface validation failed")
+            logger.error("Make sure external WiFi adapters are plugged in")
+            return False
+        
         # Enable monitor mode on interfaces
         self._enable_monitor_mode(self.monitor_interface)
         self._enable_monitor_mode(self.attack_interface)
@@ -78,12 +84,59 @@ class WiFiMonitor:
         
         logger.info("WiFi monitor stopped")
     
+    def _validate_interfaces(self) -> bool:
+        """Validate that monitor interfaces exist and aren't the management interface"""
+        try:
+            # Get list of network interfaces
+            result = subprocess.run(['ip', 'link', 'show'], 
+                                  capture_output=True, text=True, check=True)
+            interfaces = result.stdout
+            
+            # Check if monitor interface exists
+            if self.monitor_interface not in interfaces:
+                logger.error(f"Monitor interface {self.monitor_interface} does not exist!")
+                logger.error("External WiFi adapter may not be plugged in")
+                return False
+            
+            # Check if attack interface exists
+            if self.attack_interface not in interfaces:
+                logger.error(f"Attack interface {self.attack_interface} does not exist!")
+                logger.error("External WiFi adapter may not be plugged in")
+                return False
+            
+            # Get the MAC address of the onboard WiFi (management interface)
+            # This is the WiFi you're SSH'd through - NEVER put it in monitor mode!
+            onboard_mac = "dc:a6:32:9e:ea:ba"  # Your Broadcom onboard WiFi MAC
+            
+            # Check if monitor interface is the onboard WiFi
+            result = subprocess.run(['ip', 'link', 'show', self.monitor_interface],
+                                  capture_output=True, text=True, check=True)
+            if onboard_mac.lower() in result.stdout.lower():
+                logger.error(f"CRITICAL: {self.monitor_interface} is your management WiFi!")
+                logger.error("Cannot put management WiFi in monitor mode - you'll lose SSH!")
+                return False
+            
+            # Check if attack interface is the onboard WiFi
+            result = subprocess.run(['ip', 'link', 'show', self.attack_interface],
+                                  capture_output=True, text=True, check=True)
+            if onboard_mac.lower() in result.stdout.lower():
+                logger.error(f"CRITICAL: {self.attack_interface} is your management WiFi!")
+                logger.error("Cannot put management WiFi in monitor mode - you'll lose SSH!")
+                return False
+            
+            logger.info(f"Interfaces validated: {self.monitor_interface}, {self.attack_interface}")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Interface validation failed: {e}")
+            return False
+    
     def _enable_monitor_mode(self, interface: str):
         """Enable monitor mode on interface"""
         try:
-            # Kill interfering processes
-            subprocess.run(['airmon-ng', 'check', 'kill'], 
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # CRITICAL: Only kill NetworkManager if absolutely necessary
+            # For external WiFi adapters, we don't need to kill NetworkManager
+            # NetworkManager will ignore interfaces in monitor mode automatically
             
             # Bring interface down
             subprocess.run(['ip', 'link', 'set', interface, 'down'], check=True)
