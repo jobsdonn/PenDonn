@@ -796,8 +796,8 @@ Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin
 ExecStart=$INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/main.py
 Restart=always
 RestartSec=10
-StandardOutput=append:$INSTALL_DIR/logs/pendonn.log
-StandardError=append:$INSTALL_DIR/logs/pendonn_error.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -818,8 +818,8 @@ Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin
 ExecStart=$INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/web/app.py
 Restart=always
 RestartSec=10
-StandardOutput=append:$INSTALL_DIR/logs/web.log
-StandardError=append:$INSTALL_DIR/logs/web_error.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

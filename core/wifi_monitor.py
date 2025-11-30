@@ -236,10 +236,8 @@ class WiFiMonitor:
                         break
                     elt = elt.payload
             
-            # Detect encryption
-            stats = pkt[Dot11Beacon].network_stats() if pkt.haslayer(Dot11Beacon) else {}
-            crypto = stats.get('crypto', set())
-            encryption = self._get_encryption_type(crypto)
+            # Detect encryption by parsing capability info and RSN/WPA elements
+            encryption = self._detect_encryption(pkt)
             
             # Signal strength
             signal = -(256 - ord(pkt.notdecoded[-4:-3])) if hasattr(pkt, 'notdecoded') and len(pkt.notdecoded) >= 4 else -100
@@ -265,12 +263,56 @@ class WiFiMonitor:
                 if 'WPA' in encryption and bssid not in self.active_captures:
                     logger.info(f"→ Starting handshake capture for {ssid}")
                     self._start_handshake_capture(bssid, ssid, channel)
-            else:
-                self.networks[bssid]['last_seen'] = datetime.now()
-                self.networks[bssid]['signal'] = signal
+                elif 'WPA' not in encryption:
+                    logger.info(f"⊘ Skipping {ssid} - {encryption} network (no handshake possible)")
+                else:
+                    self.networks[bssid]['last_seen'] = datetime.now()
+                    self.networks[bssid]['signal'] = signal
         
         except Exception as e:
             logger.debug(f"Beacon processing error: {e}")
+    
+    def _detect_encryption(self, pkt) -> str:
+        """Detect encryption type from beacon/probe response"""
+        try:
+            # Check capability field for privacy bit
+            cap = pkt.sprintf("{Dot11Beacon:%Dot11Beacon.cap%}")
+            
+            # If privacy bit is not set, it's an open network
+            if 'privacy' not in cap.lower():
+                return "Open"
+            
+            # Parse information elements to find RSN (WPA2) or WPA
+            has_rsn = False
+            has_wpa = False
+            
+            if pkt.haslayer(Dot11Elt):
+                elt = pkt[Dot11Elt]
+                while isinstance(elt, Dot11Elt):
+                    # ID 48 = RSN (WPA2)
+                    if elt.ID == 48:
+                        has_rsn = True
+                    # ID 221 with specific OUI = WPA
+                    elif elt.ID == 221 and len(elt.info) >= 4:
+                        # Check for WPA OUI: 00:50:F2:01
+                        if elt.info[:4] == b'\x00\x50\xf2\x01':
+                            has_wpa = True
+                    elt = elt.payload
+            
+            # Determine encryption type
+            if has_rsn and has_wpa:
+                return "WPA/WPA2"
+            elif has_rsn:
+                return "WPA2"
+            elif has_wpa:
+                return "WPA"
+            else:
+                # Privacy bit set but no WPA/WPA2 found = WEP
+                return "WEP"
+                
+        except Exception as e:
+            logger.debug(f"Encryption detection error: {e}")
+            return "Unknown"
     
     def _get_encryption_type(self, crypto: set) -> str:
         """Determine encryption type"""
