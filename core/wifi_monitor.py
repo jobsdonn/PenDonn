@@ -24,8 +24,20 @@ class WiFiMonitor:
         self.config = config
         self.db = database
         
-        self.monitor_interface = config['wifi']['monitor_interface']
-        self.attack_interface = config['wifi']['attack_interface']
+        # Auto-detect correct interfaces based on MAC addresses
+        self.management_mac = "dc:a6:32:9e:ea:ba"  # Onboard WiFi MAC
+        detected_interfaces = self._detect_wifi_interfaces()
+        
+        if len(detected_interfaces) < 2:
+            logger.error(f"Not enough WiFi adapters! Found {len(detected_interfaces)}, need at least 2 external adapters")
+            logger.error("Please plug in external WiFi adapters")
+        
+        # Use detected interfaces, fallback to config if detection fails
+        self.monitor_interface = detected_interfaces[0] if len(detected_interfaces) >= 1 else config['wifi']['monitor_interface']
+        self.attack_interface = detected_interfaces[1] if len(detected_interfaces) >= 2 else config['wifi']['attack_interface']
+        
+        logger.info(f"Using interfaces: monitor={self.monitor_interface}, attack={self.attack_interface}")
+        
         self.channel_hop_interval = config['wifi']['channel_hop_interval']
         self.handshake_timeout = config['wifi']['handshake_timeout']
         
@@ -46,6 +58,41 @@ class WiFiMonitor:
             logger.info(f"Whitelist active: Only attacking {len(self.whitelist_ssids)} SSIDs: {list(self.whitelist_ssids)}")
         else:
             logger.warning("Whitelist is EMPTY - will attack ALL networks discovered!")
+    
+    def _detect_wifi_interfaces(self) -> List[str]:
+        """Detect external WiFi interfaces (exclude management interface)"""
+        try:
+            result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True, check=True)
+            lines = result.stdout.split('\n')
+            
+            external_interfaces = []
+            current_interface = None
+            
+            for line in lines:
+                # Line with interface name: "3: wlan0: <BROADCAST..."
+                if ': ' in line and 'wlan' in line:
+                    parts = line.split(': ')
+                    if len(parts) >= 2:
+                        current_interface = parts[1].split('@')[0]  # Get interface name
+                
+                # Line with MAC: "    link/ether dc:a6:32:9e:ea:ba"
+                elif 'link/ether' in line and current_interface:
+                    mac = line.strip().split()[1].lower()
+                    
+                    # Skip management interface
+                    if mac != self.management_mac.lower():
+                        external_interfaces.append(current_interface)
+                        logger.info(f"Detected external WiFi: {current_interface} ({mac})")
+                    else:
+                        logger.info(f"Detected management WiFi: {current_interface} ({mac}) - will NOT use")
+                    
+                    current_interface = None
+            
+            return external_interfaces
+            
+        except Exception as e:
+            logger.error(f"Failed to detect WiFi interfaces: {e}")
+            return []
     
     def start(self):
         """Start WiFi monitoring"""
