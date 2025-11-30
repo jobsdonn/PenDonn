@@ -33,42 +33,7 @@ unmanaged-devices=interface-name:wlan1;interface-name:wlan2  # Don't manage pent
 
 ##Human: Scripts Removed
 
-The following complex WiFi scripts have been **removed** because they were causing more problems than they solved:
-
-- ❌ `auto-fix-wifi-interfaces.sh` - Caused race conditions during boot
-- ❌ `fix-wifi-interfaces.sh` - Not needed with proper NM config
-- ❌ `recover-wifi.sh` - NetworkManager handles recovery
-- ❌ `troubleshoot-wifi.sh` - Use `diagnose-wifi-issue.sh` instead
-- ❌ `quick-wifi-fix.sh` - Replaced by `cleanup-and-fix-wifi.sh`
-- ❌ WiFi keeper service - NetworkManager reconnects automatically
-- ❌ udev rules - They were causing timing issues
-
 ## Available Scripts
-
-### cleanup-and-fix-wifi.sh
-**Purpose**: Clean up old WiFi management and apply the new, simple approach
-
-**When to use**: 
-- After upgrading from old PenDonn version
-- If WiFi is broken and you want a fresh start
-- To remove all old complex WiFi code
-
-**What it does**:
-1. Removes old services and scripts
-2. Removes udev rules
-3. Configures NetworkManager properly
-4. Disables ModemManager (causes WiFi issues)
-5. Unblocks WiFi with rfkill
-
-### diagnose-wifi-issue.sh  
-**Purpose**: Diagnose WiFi problems with comprehensive logging
-
-**When to use**:
-- WiFi disconnects after reboot
-- Investigating connection issues
-- Before asking for help (share the report)
-
-**Output**: Detailed report in `/tmp/pendonn-wifi-diagnosis-*.txt`
 
 ### detect-wifi-adapters.sh
 **Purpose**: List all WiFi adapters with drivers and capabilities
@@ -89,15 +54,38 @@ The following complex WiFi scripts have been **removed** because they were causi
 
 ### WiFi disconnects after reboot
 
-**Most likely cause**: ModemManager is running
+The installer now handles all WiFi configuration automatically. If you experience issues:
 
-**Fix**:
+1. **Check services are disabled**:
 ```bash
-sudo systemctl stop ModemManager
-sudo systemctl disable ModemManager
-sudo systemctl mask ModemManager
-sudo reboot
+systemctl status pendonn pendonn-web
+# Should show "disabled" and "inactive (dead)"
 ```
+
+2. **Verify NetworkManager is running**:
+```bash
+systemctl status NetworkManager
+```
+
+3. **Check diagnostic logs**:
+```bash
+cat /var/log/pendonn-boot-diagnostics.log
+```
+
+### WiFi dies when starting PenDonn
+
+**Make sure external WiFi adapters are plugged in**:
+```bash
+ip link show | grep wlan
+# Should show wlan0 (onboard), wlan1 and wlan2 (external)
+```
+
+**Check the logs**:
+```bash
+sudo journalctl -u pendonn -f
+```
+
+PenDonn will refuse to start if external adapters aren't detected, preventing your SSH connection from dying.
 
 ### WiFi won't reconnect automatically
 
@@ -204,12 +192,12 @@ If you need to modify WiFi behavior:
 
 ## Migration from Old Version
 
-If you have an old PenDonn installation:
+If you have an old PenDonn installation, run a fresh install:
 
 ```bash
-cd /opt/pendonn
-sudo ./scripts/cleanup-and-fix-wifi.sh
-sudo reboot
+cd ~/pendonn
+sudo ./scripts/install.sh
 ```
 
-This will remove all old WiFi management and set up the new approach.
+The installer now includes all WiFi fixes and proper configuration.
+

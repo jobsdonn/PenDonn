@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
 env/
 *.egg-info/
 dist/
@@ -21,6 +22,9 @@ data/*.db.backup.*
 # Logs
 logs/*.log
 *.log
+
+# Debug
+debug/
 
 # Handshakes
 handshakes/*.cap
