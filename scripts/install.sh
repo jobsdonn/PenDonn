@@ -917,8 +917,19 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     
     if [ "$INTERFACE_COUNT" -ge 3 ]; then
         echo -e "${YELLOW}Available interfaces:${NC}"
+        
+        # Get MAC addresses and detect onboard WiFi
+        ONBOARD_MAC="dc:a6:32:9e:ea:ba"
         for i in "${!INTERFACES[@]}"; do
-            echo "  $((i+1)). ${INTERFACES[$i]}"
+            IFACE="${INTERFACES[$i]}"
+            MAC=$(ip link show "$IFACE" 2>/dev/null | grep -oP '(?<=link/ether )[0-9a-f:]+' || echo "unknown")
+            
+            # Check if this is the onboard WiFi
+            if [ "$MAC" = "$ONBOARD_MAC" ]; then
+                echo "  $((i+1)). $IFACE (MAC: $MAC) ${GREEN}← Built-in WiFi (recommend for management)${NC}"
+            else
+                echo "  $((i+1)). $IFACE (MAC: $MAC) ${CYAN}← External adapter${NC}"
+            fi
         done
         echo ""
         

@@ -25,20 +25,50 @@
         }
 
         header {
-            text-align: center;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             padding: 30px 0;
             border-bottom: 2px solid rgba(255,255,255,0.2);
             margin-bottom: 30px;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .header-left {
+            flex: 1;
         }
 
         h1 {
             font-size: 3em;
             text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            margin: 0;
         }
 
         .subtitle {
             color: #a8d0ff;
             margin-top: 10px;
+        }
+
+        .service-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .service-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            margin-right: 10px;
+        }
+
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 0.9em;
         }
 
         .dashboard {
@@ -229,6 +259,51 @@
             color: #a8d0ff;
         }
 
+        .log-viewer {
+            background: #0a1628;
+            border-radius: 10px;
+            padding: 20px;
+            max-height: 600px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+
+        .log-line {
+            margin: 2px 0;
+            word-wrap: break-word;
+        }
+
+        .log-error {
+            color: #ff6b6b;
+        }
+
+        .log-warning {
+            color: #ffd93d;
+        }
+
+        .log-info {
+            color: #6bcf7f;
+        }
+
+        .log-debug {
+            color: #a8d0ff;
+        }
+
+        .log-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+
+        .log-controls label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
         .controls {
             display: flex;
             gap: 10px;
@@ -250,8 +325,19 @@
 <body>
     <div class="container">
         <header>
-            <h1>🔒 PenDonn</h1>
-            <p class="subtitle">Automated Penetration Testing System</p>
+            <div class="header-left">
+                <h1>🔒 PenDonn</h1>
+                <p class="subtitle">Automated Penetration Testing System</p>
+            </div>
+            <div class="service-controls">
+                <div class="service-status">
+                    <span class="status-indicator" id="service-status-dot"></span>
+                    <span id="service-status-text">Checking...</span>
+                </div>
+                <button class="btn btn-sm" onclick="controlService('start')" id="btn-start">▶️ Start</button>
+                <button class="btn btn-sm btn-danger" onclick="controlService('stop')" id="btn-stop">⏹️ Stop</button>
+                <button class="btn btn-sm" onclick="controlService('restart')" id="btn-restart">🔄 Restart</button>
+            </div>
         </header>
 
         <div class="dashboard" id="stats">
@@ -286,6 +372,7 @@
             <div class="tab" onclick="switchTab('scans')">Scans</div>
             <div class="tab" onclick="switchTab('vulnerabilities')">Vulnerabilities</div>
             <div class="tab" onclick="switchTab('whitelist')">Whitelist</div>
+            <div class="tab" onclick="switchTab('logs')">📋 Logs</div>
         </div>
 
         <div id="networks-panel" class="content-panel active">
@@ -321,10 +408,37 @@
             </div>
             <div id="whitelist-content" class="loading">Loading...</div>
         </div>
+
+        <div id="logs-panel" class="content-panel">
+            <h2>System Logs</h2>
+            <div class="log-controls">
+                <button class="btn btn-sm" onclick="toggleLogStream()">
+                    <span id="log-stream-btn-text">⏸ Pause</span>
+                </button>
+                <button class="btn btn-sm" onclick="clearLogs()">🗑️ Clear</button>
+                <label>
+                    <input type="checkbox" id="log-autoscroll" checked>
+                    Auto-scroll
+                </label>
+                <label>
+                    Lines: 
+                    <select id="log-lines" onchange="reconnectLogStream()">
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="200">200</option>
+                        <option value="500">500</option>
+                    </select>
+                </label>
+            </div>
+            <div class="log-viewer" id="log-viewer"></div>
+        </div>
     </div>
 
     <script>
         let currentTab = 'networks';
+        let logEventSource = null;
+        let logStreamActive = true;
+        let maxLogLines = 500;
 
         function switchTab(tab) {
             // Update tab buttons
@@ -347,6 +461,7 @@
                 case 'scans': loadScans(); break;
                 case 'vulnerabilities': loadVulnerabilities(); break;
                 case 'whitelist': loadWhitelist(); break;
+                case 'logs': startLogStream(); break;
             }
         }
 
@@ -361,10 +476,126 @@
                     document.getElementById('stat-handshakes').textContent = stats.handshakes_captured;
                     document.getElementById('stat-passwords').textContent = stats.passwords_cracked;
                     document.getElementById('stat-vulns').textContent = stats.vulnerabilities_found;
+                    
+                    // Update service status
+                    const statusDot = document.getElementById('service-status-dot');
+                    const statusText = document.getElementById('service-status-text');
+                    
+                    if (data.status.daemon_running) {
+                        statusDot.className = 'status-indicator status-running';
+                        statusText.textContent = 'Running';
+                    } else {
+                        statusDot.className = 'status-indicator status-stopped';
+                        statusText.textContent = 'Stopped';
+                    }
                 }
             } catch (error) {
                 console.error('Error loading status:', error);
+                const statusDot = document.getElementById('service-status-dot');
+                const statusText = document.getElementById('service-status-text');
+                statusDot.className = 'status-indicator status-stopped';
+                statusText.textContent = 'Error';
             }
+        }
+
+        async function controlService(action) {
+            if (!confirm(`Are you sure you want to ${action} the PenDonn service?`)) return;
+            
+            const btn = document.getElementById(`btn-${action}`);
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳ Please wait...';
+            
+            try {
+                const response = await fetch(`/api/service/${action}`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Service ${action}ed successfully`);
+                    setTimeout(loadStatus, 1000);
+                } else {
+                    alert(`Error: ${data.error}`);
+                }
+            } catch (error) {
+                alert(`Error controlling service: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
+        function startLogStream() {
+            if (logEventSource) {
+                logEventSource.close();
+            }
+            
+            const lines = document.getElementById('log-lines').value;
+            logEventSource = new EventSource(`/api/logs/stream?lines=${lines}`);
+            logStreamActive = true;
+            document.getElementById('log-stream-btn-text').textContent = '⏸ Pause';
+            
+            logEventSource.onmessage = function(event) {
+                if (!logStreamActive) return;
+                
+                const logViewer = document.getElementById('log-viewer');
+                const logLine = document.createElement('div');
+                logLine.className = 'log-line';
+                
+                // Color code by log level
+                const line = event.data;
+                if (line.includes('ERROR')) {
+                    logLine.className += ' log-error';
+                } else if (line.includes('WARNING')) {
+                    logLine.className += ' log-warning';
+                } else if (line.includes('INFO')) {
+                    logLine.className += ' log-info';
+                } else if (line.includes('DEBUG')) {
+                    logLine.className += ' log-debug';
+                }
+                
+                logLine.textContent = line;
+                logViewer.appendChild(logLine);
+                
+                // Limit number of lines
+                while (logViewer.children.length > maxLogLines) {
+                    logViewer.removeChild(logViewer.firstChild);
+                }
+                
+                // Auto-scroll
+                if (document.getElementById('log-autoscroll').checked) {
+                    logViewer.scrollTop = logViewer.scrollHeight;
+                }
+            };
+            
+            logEventSource.onerror = function(error) {
+                console.error('Log stream error:', error);
+                const logViewer = document.getElementById('log-viewer');
+                const errorLine = document.createElement('div');
+                errorLine.className = 'log-line log-error';
+                errorLine.textContent = '❌ Connection lost. Trying to reconnect...';
+                logViewer.appendChild(errorLine);
+            };
+        }
+
+        function toggleLogStream() {
+            logStreamActive = !logStreamActive;
+            const btn = document.getElementById('log-stream-btn-text');
+            btn.textContent = logStreamActive ? '⏸ Pause' : '▶️ Resume';
+        }
+
+        function reconnectLogStream() {
+            if (logEventSource) {
+                logEventSource.close();
+            }
+            clearLogs();
+            startLogStream();
+        }
+
+        function clearLogs() {
+            document.getElementById('log-viewer').innerHTML = '';
         }
 
         async function loadNetworks() {

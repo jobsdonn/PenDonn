@@ -7,8 +7,9 @@ import os
 import sys
 import json
 import logging
+import subprocess
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
 from flask_cors import CORS
 
 # Add parent directory to path
@@ -349,6 +350,64 @@ def remove_from_whitelist(ssid):
         })
     except Exception as e:
         logger.error(f"Remove from whitelist error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/logs/stream')
+def stream_logs():
+    """Stream systemd journal logs using Server-Sent Events"""
+    def generate():
+        lines = request.args.get('lines', 100, type=int)
+        
+        # Start journalctl process with follow
+        process = subprocess.Popen(
+            ['journalctl', '-u', 'pendonn', '-f', '-n', str(lines), '--no-pager'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
+        
+        try:
+            for line in iter(process.stdout.readline, ''):
+                if line:
+                    yield f"data: {line.rstrip()}\n\n"
+        except GeneratorExit:
+            process.terminate()
+            process.wait()
+    
+    return Response(stream_with_context(generate()), 
+                   mimetype='text/event-stream',
+                   headers={
+                       'Cache-Control': 'no-cache',
+                       'X-Accel-Buffering': 'no'
+                   })
+
+
+@app.route('/api/logs')
+def get_logs():
+    """Get recent logs (non-streaming)"""
+    try:
+        lines = request.args.get('lines', 100, type=int)
+        
+        result = subprocess.run(
+            ['journalctl', '-u', 'pendonn', '-n', str(lines), '--no-pager'],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'logs': result.stdout.split('\n')
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.stderr
+            }), 500
+    except Exception as e:
+        logger.error(f"Get logs error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

@@ -337,7 +337,8 @@ class WiFiMonitor:
             if 'WPA' in encryption and bssid not in self.active_captures:
                 logger.info(f"→ Starting handshake capture for {ssid}")
                 self._start_handshake_capture(bssid, ssid, channel)
-            elif 'WPA' not in encryption:
+            elif 'WPA' not in encryption and bssid not in self.active_captures:
+                # Only skip networks that are NOT already being captured
                 # Only log skip message for new networks or once every 5 minutes
                 should_log = bssid not in self.networks
                 if not should_log and self.networks[bssid].get('last_skip_log', 0) < time.time() - 300:
