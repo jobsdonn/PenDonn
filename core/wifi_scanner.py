@@ -407,9 +407,11 @@ class WiFiScanner:
             if result.returncode == 0:
                 logger.info(f"✓ Deauth sent to {ssid}")
                 capture_info['deauth_sent'] = True
+                capture_info['deauth_time'] = time.time()  # Track when deauth was sent
             else:
                 logger.warning(f"Deauth failed for {ssid}: {result.stderr[:200]}")
                 capture_info['deauth_sent'] = True  # Mark as sent anyway
+                capture_info['deauth_time'] = time.time()
         
         except Exception as e:
             logger.error(f"Deauth error for {ssid}: {e}")
@@ -435,6 +437,15 @@ class WiFiScanner:
                     
                     # Check for handshake
                     if capture_info.get('deauth_sent', False):
+                        # Wait at least 15 seconds after deauth for full reconnection
+                        # (authentication + association + 4-way handshake)
+                        deauth_time = capture_info.get('deauth_time', 0)
+                        time_since_deauth = time.time() - deauth_time
+                        
+                        if time_since_deauth < 15:
+                            logger.debug(f"⏳ Waiting for {ssid} to reconnect ({int(time_since_deauth)}s)")
+                            continue
+                        
                         has_handshake = self._check_handshake(capture_info['capture_file'])
                         
                         if has_handshake:
