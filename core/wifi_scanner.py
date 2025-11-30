@@ -69,16 +69,19 @@ class WiFiScanner:
                     if len(parts) >= 2:
                         current_iface = parts[1].split(':')[0].split('@')[0]
                         
-                # Look for MAC address on following line
-                elif 'link/ether' in line and current_iface:
-                    mac = line.strip().split()[1].lower()
-                    
-                    # Exclude management interface by MAC
-                    if mac != self.management_mac.lower():
-                        interfaces.append(current_iface)
-                        logger.info(f"Found external WiFi: {current_iface} ({mac})")
-                    else:
-                        logger.info(f"Skipping management interface: {current_iface} ({mac})")
+                # Look for MAC address on following line (both ether and radiotap)
+                elif ('link/ether' in line or 'link/ieee802.11' in line) and current_iface:
+                    parts = line.strip().split()
+                    # Get MAC address (second field after link type)
+                    if len(parts) >= 2:
+                        mac = parts[1].lower()
+                        
+                        # Exclude management interface by MAC
+                        if mac != self.management_mac.lower():
+                            interfaces.append(current_iface)
+                            logger.info(f"Found external WiFi: {current_iface} ({mac})")
+                        else:
+                            logger.info(f"Skipping management interface: {current_iface} ({mac})")
                     
                     current_iface = None
             
