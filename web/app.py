@@ -72,14 +72,24 @@ def get_status():
 
 @app.route('/api/networks')
 def get_networks():
-    """Get discovered networks"""
+    """Get discovered networks - only show recently seen (active) networks"""
     try:
         whitelisted = request.args.get('whitelisted')
+        recent_only = request.args.get('recent_only', 'true').lower() == 'true'
         
         if whitelisted is not None:
             whitelisted = whitelisted.lower() == 'true'
         
         networks = db.get_networks(whitelisted=whitelisted)
+        
+        # Filter to only show networks seen in the last 5 minutes
+        if recent_only:
+            from datetime import timedelta
+            cutoff_time = datetime.now() - timedelta(minutes=5)
+            networks = [
+                n for n in networks 
+                if datetime.fromisoformat(n['last_seen']) > cutoff_time
+            ]
         
         return jsonify({
             'success': True,

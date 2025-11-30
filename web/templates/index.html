@@ -246,6 +246,45 @@
             color: rgba(255,255,255,0.5);
         }
 
+        .network-list {
+            display: grid;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .network-item {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .network-item:hover {
+            background: rgba(255,255,255,0.2);
+            border-color: #4affff;
+            transform: translateX(5px);
+        }
+
+        .network-item-info {
+            flex: 1;
+        }
+
+        .network-item-ssid {
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+
+        .network-item-details {
+            font-size: 0.9em;
+            color: #a8d0ff;
+        }
+
         .loading {
             text-align: center;
             padding: 40px;
@@ -405,7 +444,15 @@
             <div class="whitelist-form">
                 <input type="text" id="whitelist-input" placeholder="Enter SSID to whitelist...">
                 <button class="btn" onclick="addToWhitelist()">Add to Whitelist</button>
+                <button class="btn" onclick="showNetworkScanner()">📡 Scan Networks</button>
             </div>
+            
+            <div id="network-scanner" style="display: none; margin-bottom: 20px;">
+                <h3>Available Networks (Tap to add to whitelist)</h3>
+                <div id="scanned-networks" class="loading">Loading...</div>
+            </div>
+            
+            <h3>Current Whitelist</h3>
             <div id="whitelist-content" class="loading">Loading...</div>
         </div>
 
@@ -852,6 +899,76 @@
                 }
             } catch (error) {
                 alert('Error removing from whitelist');
+                console.error('Error:', error);
+            }
+        }
+
+        async function showNetworkScanner() {
+            const scanner = document.getElementById('network-scanner');
+            const content = document.getElementById('scanned-networks');
+            
+            // Toggle visibility
+            if (scanner.style.display === 'none') {
+                scanner.style.display = 'block';
+                content.innerHTML = '<div class="loading">Scanning for networks...</div>';
+                await loadAvailableNetworks();
+            } else {
+                scanner.style.display = 'none';
+            }
+        }
+
+        async function loadAvailableNetworks() {
+            const content = document.getElementById('scanned-networks');
+            try {
+                const response = await fetch('/api/networks?recent_only=true');
+                const data = await response.json();
+                
+                if (data.success && data.networks.length > 0) {
+                    let html = '<div class="network-list">';
+                    
+                    data.networks.forEach(net => {
+                        const inWhitelist = net.is_whitelisted ? ' ✓ In Whitelist' : '';
+                        html += `<div class="network-item" onclick="addNetworkToWhitelist('${net.ssid}')">
+                            <div class="network-item-info">
+                                <div class="network-item-ssid">${net.ssid}${inWhitelist}</div>
+                                <div class="network-item-details">
+                                    ${net.encryption} • Channel ${net.channel} • ${net.signal_strength} dBm
+                                </div>
+                            </div>
+                            <div>➕</div>
+                        </div>`;
+                    });
+                    
+                    html += '</div>';
+                    content.innerHTML = html;
+                } else {
+                    content.innerHTML = '<div class="empty-state">No networks found nearby</div>';
+                }
+            } catch (error) {
+                content.innerHTML = '<div class="empty-state">Error scanning networks</div>';
+                console.error('Error:', error);
+            }
+        }
+
+        async function addNetworkToWhitelist(ssid) {
+            try {
+                const response = await fetch('/api/whitelist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    loadWhitelist();
+                    loadAvailableNetworks(); // Refresh to show updated status
+                    alert(`✓ ${ssid} added to whitelist`);
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Error adding to whitelist');
                 console.error('Error:', error);
             }
         }

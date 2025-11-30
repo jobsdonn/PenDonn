@@ -10,7 +10,7 @@ import subprocess
 import logging
 from datetime import datetime
 from typing import List, Dict, Optional, Set
-from scapy.all import sniff, Dot11, Dot11Beacon, Dot11ProbeResp, Dot11Elt, EAPOL
+from scapy.all import sniff, Dot11, Dot11Beacon, Dot11ProbeResp, Dot11Elt, EAPOL, RadioTap
 import json
 
 logger = logging.getLogger(__name__)
@@ -308,8 +308,23 @@ class WiFiMonitor:
             
             logger.debug(f"Network {ssid} ({bssid}): encryption={encryption}")
             
-            # Signal strength
-            signal = -(256 - ord(pkt.notdecoded[-4:-3])) if hasattr(pkt, 'notdecoded') and len(pkt.notdecoded) >= 4 else -100
+            # Signal strength - try multiple methods
+            signal = -100  # Default fallback
+            
+            # Method 1: RadioTap dBm_AntSignal
+            if pkt.haslayer(RadioTap):
+                try:
+                    if hasattr(pkt[RadioTap], 'dBm_AntSignal'):
+                        signal = pkt[RadioTap].dBm_AntSignal
+                except Exception as e:
+                    logger.debug(f"RadioTap signal parsing failed: {e}")
+            
+            # Method 2: notdecoded field (fallback)
+            if signal == -100 and hasattr(pkt, 'notdecoded') and len(pkt.notdecoded) >= 4:
+                try:
+                    signal = -(256 - ord(pkt.notdecoded[-4:-3]))
+                except Exception as e:
+                    logger.debug(f"notdecoded signal parsing failed: {e}")
             
             # Store/update network
             if bssid not in self.networks:
@@ -339,6 +354,10 @@ class WiFiMonitor:
                 self.networks[bssid]['encryption'] = encryption
                 # Update database too
                 self.db.add_network(ssid, bssid, channel, encryption, signal)
+                
+                # Update whitelist flag if SSID is in whitelist
+                if ssid in self.whitelist_ssids:
+                    self.db.set_whitelist(bssid, True)
             
             # Start handshake capture if WPA/WPA2 and not already capturing
             if 'WPA' in encryption and bssid not in self.active_captures:
