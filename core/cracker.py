@@ -183,32 +183,39 @@ class PasswordCracker:
             
             logger.info(f"Cracking with John the Ripper: {handshake['ssid']}")
             
-            # Convert to John format if needed
-            john_file = capture_file.replace('.cap', '.john')
+            # Convert to hashcat 22000 format (modern WPA/WPA2)
+            # This format works for both John and Hashcat
+            hash_file = capture_file.replace('.cap', '.22000')
             
-            # Convert using hccap2john or aircrack2john
-            if not os.path.exists(john_file):
-                # Try to convert
-                subprocess.run(
-                    ['aircrack-ng', '-J', john_file.replace('.john', ''), capture_file],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=30
-                )
-                john_file = john_file.replace('.john', '.hccap.john')
+            # Convert using hcxpcapngtool
+            if not os.path.exists(hash_file):
+                try:
+                    result = subprocess.run(
+                        ['hcxpcapngtool', '-o', hash_file, capture_file],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    
+                    if result.returncode != 0 or not os.path.exists(hash_file):
+                        logger.warning(f"hcxpcapngtool failed for {handshake_id}: {result.stderr[:100]}")
+                        return None
+                except FileNotFoundError:
+                    logger.error("hcxpcapngtool not found. Install with: sudo apt install hcxtools")
+                    return None
             
-            if not os.path.exists(john_file):
-                logger.warning(f"Could not create John format file for {handshake_id}")
+            if not os.path.exists(hash_file) or os.path.getsize(hash_file) == 0:
+                logger.warning(f"Could not create hash file for {handshake_id}")
                 return None
             
-            # Run John the Ripper
+            # Run John the Ripper with hashcat format
             start_time = time.time()
             
             cmd = [
                 'john',
                 '--wordlist=' + self.wordlist,
-                '--format=' + self.john_format,
-                john_file
+                '--format=hashcat',  # John can read hashcat 22000 format
+                hash_file
             ]
             
             process = subprocess.Popen(
@@ -226,7 +233,7 @@ class PasswordCracker:
             crack_time = time.time() - start_time
             
             # Check if password was found
-            show_cmd = ['john', '--show', '--format=' + self.john_format, john_file]
+            show_cmd = ['john', '--show', '--format=hashcat', hash_file]
             result = subprocess.run(show_cmd, capture_output=True, text=True)
             
             if result.stdout:
@@ -258,33 +265,40 @@ class PasswordCracker:
             
             logger.info(f"Cracking with Hashcat: {handshake['ssid']}")
             
-            # Convert to hashcat format (hc22000)
-            hc_file = capture_file.replace('.cap', '.hc22000')
+            # Convert to hashcat 22000 format
+            hash_file = capture_file.replace('.cap', '.22000')
             
-            if not os.path.exists(hc_file):
-                # Convert using hcxpcapngtool
-                result = subprocess.run(
-                    ['hcxpcapngtool', '-o', hc_file, capture_file],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=30
-                )
-                
-                if not os.path.exists(hc_file):
-                    logger.warning(f"Could not create Hashcat format file for {handshake_id}")
+            if not os.path.exists(hash_file):
+                try:
+                    result = subprocess.run(
+                        ['hcxpcapngtool', '-o', hash_file, capture_file],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    
+                    if result.returncode != 0 or not os.path.exists(hash_file):
+                        logger.warning(f"hcxpcapngtool failed: {result.stderr[:100]}")
+                        return None
+                except FileNotFoundError:
+                    logger.error("hcxpcapngtool not found. Install with: sudo apt install hcxtools")
                     return None
             
+            if not os.path.exists(hash_file) or os.path.getsize(hash_file) == 0:
+                logger.warning(f"Could not create Hashcat format file for {handshake_id}")
+                return None
+            
             # Output file for cracked passwords
-            output_file = hc_file + '.cracked'
+            output_file = hash_file + '.cracked'
             
             # Run Hashcat
             start_time = time.time()
             
             cmd = [
                 'hashcat',
-                '-m', str(self.hashcat_mode),
+                '-m', str(self.hashcat_mode),  # 22000 for WPA-PBKDF2-PMKID+EAPOL
                 '-a', '0',  # Dictionary attack
-                hc_file,
+                hash_file,
                 self.wordlist,
                 '-o', output_file,
                 '--force',  # Force if no GPU
