@@ -170,12 +170,19 @@ class WiFiMonitor:
         channels = list(range(1, 14))  # 2.4GHz channels
         channel_idx = 0
         
+        logger.info(f"Channel hopper started - will cycle through channels 1-13")
+        
         while self.running:
             try:
                 channel = channels[channel_idx % len(channels)]
                 subprocess.run(['iw', 'dev', self.monitor_interface, 'set', 'channel', str(channel)],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self.current_channel = channel
+                
+                # Log channel every 10 hops (every 20 seconds)
+                if channel_idx % 10 == 0:
+                    logger.debug(f"Channel hopping: now on channel {channel}")
+                
                 channel_idx += 1
                 time.sleep(self.channel_hop_interval)
             except Exception as e:
@@ -184,12 +191,24 @@ class WiFiMonitor:
     
     def _packet_sniffer(self):
         """Sniff WiFi packets to discover networks"""
+        packet_count = 0
+        beacon_count = 0
+        
         def packet_handler(pkt):
+            nonlocal packet_count, beacon_count
+            packet_count += 1
+            
             if not self.running:
                 return
             
             try:
                 if pkt.haslayer(Dot11Beacon) or pkt.haslayer(Dot11ProbeResp):
+                    beacon_count += 1
+                    
+                    # Log every 100 beacons
+                    if beacon_count % 100 == 0:
+                        logger.debug(f"Packet sniffer stats: {packet_count} packets, {beacon_count} beacons")
+                    
                     self._process_beacon(pkt)
                 elif pkt.haslayer(EAPOL):
                     self._process_eapol(pkt)
@@ -197,6 +216,7 @@ class WiFiMonitor:
                 logger.debug(f"Packet processing error: {e}")
         
         try:
+            logger.info(f"Starting packet sniffer on {self.monitor_interface}")
             sniff(iface=self.monitor_interface, prn=packet_handler, store=0)
         except Exception as e:
             logger.error(f"Packet sniffing error: {e}")
@@ -239,6 +259,8 @@ class WiFiMonitor:
             # Detect encryption by parsing capability info and RSN/WPA elements
             encryption = self._detect_encryption(pkt)
             
+            logger.debug(f"Network {ssid} ({bssid}): encryption={encryption}")
+            
             # Signal strength
             signal = -(256 - ord(pkt.notdecoded[-4:-3])) if hasattr(pkt, 'notdecoded') and len(pkt.notdecoded) >= 4 else -100
             
@@ -268,11 +290,16 @@ class WiFiMonitor:
             if 'WPA' in encryption and bssid not in self.active_captures:
                 logger.info(f"→ Starting handshake capture for {ssid}")
                 self._start_handshake_capture(bssid, ssid, channel)
-            elif 'WPA' not in encryption and bssid not in self.networks or bssid in self.networks and self.networks[bssid].get('last_log_time', 0) < time.time() - 300:
-                # Only log skip message once every 5 minutes to avoid spam
-                logger.info(f"⊘ Skipping {ssid} - {encryption} network (no handshake possible)")
-                if bssid in self.networks:
-                    self.networks[bssid]['last_log_time'] = time.time()
+            elif 'WPA' not in encryption:
+                # Only log skip message for new networks or once every 5 minutes
+                should_log = bssid not in self.networks
+                if not should_log and self.networks[bssid].get('last_skip_log', 0) < time.time() - 300:
+                    should_log = True
+                
+                if should_log:
+                    logger.info(f"⊘ Skipping {ssid} - {encryption} network (no handshake possible)")
+                    if bssid in self.networks:
+                        self.networks[bssid]['last_skip_log'] = time.time()
         
         except Exception as e:
             logger.debug(f"Beacon processing error: {e}")
