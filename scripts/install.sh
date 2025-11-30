@@ -956,12 +956,14 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     
     # Whitelist Configuration
     echo -e "${BLUE}[2/5] Whitelist Configuration${NC}"
-    echo -e "${YELLOW}Add SSIDs to avoid scanning (your home/work networks)${NC}"
+    echo -e "${YELLOW}⚠️  WHITELIST = Networks you want to ATTACK${NC}"
+    echo -e "${YELLOW}Only SSIDs in this list will be targeted${NC}"
+    echo -e "${YELLOW}Leave empty to attack ALL networks${NC}"
     echo ""
     
     WHITELIST_SSIDS=""
     while true; do
-        read -p "Enter SSID to whitelist (or press Enter to skip): " SSID
+        read -p "Enter SSID to target (or press Enter when done): " SSID
         if [ -z "$SSID" ]; then
             break
         fi
@@ -970,14 +972,14 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
         else
             WHITELIST_SSIDS="$WHITELIST_SSIDS, \"$SSID\""
         fi
-        echo -e "${GREEN}Added: $SSID${NC}"
+        echo -e "${GREEN}✓ Will attack: $SSID${NC}"
     done
     
     if [ -n "$WHITELIST_SSIDS" ]; then
         sed -i "s/\"ssids\": \[\]/\"ssids\": [$WHITELIST_SSIDS]/g" "$CONFIG_FILE"
-        echo -e "${GREEN}Whitelist configured${NC}"
+        echo -e "${GREEN}Whitelist configured - will ONLY attack these networks${NC}"
     else
-        echo -e "${YELLOW}No SSIDs whitelisted - will scan ALL networks${NC}"
+        echo -e "${RED}⚠️  No whitelist - will attack ALL networks discovered!${NC}"
     fi
     
     echo ""

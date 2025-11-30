@@ -27,13 +27,31 @@ else
     echo -e "${RED}Handshake directory doesn't exist!${NC}"
 fi
 
-echo -e "\n${YELLOW}4. Check active captures from database:${NC}"
-sqlite3 /opt/pendonn/data/pendonn.db "SELECT ssid, bssid, channel, encryption, signal, discovered_at FROM networks ORDER BY discovered_at DESC LIMIT 10;" 2>/dev/null || echo "Database query failed"
+echo -e "\n${YELLOW}4. Check if PenDonn is actually running:${NC}"
+systemctl status pendonn --no-pager
+echo ""
+ps aux | grep -E "python.*main.py|pendonn" | grep -v grep
 
-echo -e "\n${YELLOW}5. Check PenDonn service logs (last 30 lines):${NC}"
-journalctl -u pendonn -n 30 --no-pager
+echo -e "\n${YELLOW}5. Check database and recent networks:${NC}"
+if [ -f "/opt/pendonn/data/pendonn.db" ]; then
+    echo "Database exists"
+    sqlite3 /opt/pendonn/data/pendonn.db "SELECT ssid, bssid, channel, encryption, signal, discovered_at FROM networks ORDER BY discovered_at DESC LIMIT 10;" 2>/dev/null || echo -e "${RED}Database query failed - check if database is corrupted${NC}"
+else
+    echo -e "${RED}Database doesn't exist!${NC}"
+fi
 
-echo -e "\n${YELLOW}6. Test airodump-ng manually:${NC}"
+echo -e "\n${YELLOW}6. Check application logs (most recent):${NC}"
+if [ -f "/opt/pendonn/logs/pendonn.log" ]; then
+    echo "Last 50 lines from pendonn.log:"
+    tail -50 /opt/pendonn/logs/pendonn.log
+else
+    echo -e "${RED}Log file doesn't exist!${NC}"
+fi
+
+echo -e "\n${YELLOW}7. Check systemd service logs:${NC}"
+journalctl -u pendonn -n 50 --no-pager
+
+echo -e "\n${YELLOW}8. Test airodump-ng manually:${NC}"
 echo "To test manually, run:"
 echo "  sudo airodump-ng wlan1"
 echo "  sudo aireplay-ng --test wlan2"
