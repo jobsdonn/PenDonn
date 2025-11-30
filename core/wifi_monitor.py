@@ -42,6 +42,10 @@ class WiFiMonitor:
         self.active_captures = {}  # bssid -> capture_info
         
         logger.info("WiFi Monitor initialized")
+        if self.whitelist_ssids:
+            logger.info(f"Whitelist active: Only attacking {len(self.whitelist_ssids)} SSIDs: {list(self.whitelist_ssids)}")
+        else:
+            logger.warning("Whitelist is EMPTY - will attack ALL networks discovered!")
     
     def start(self):
         """Start WiFi monitoring"""
@@ -212,7 +216,14 @@ class WiFiMonitor:
                         break
                     ssid_layer = ssid_layer.payload
             
-            if not ssid or ssid in self.whitelist_ssids:
+            # Skip if no SSID
+            if not ssid:
+                return
+            
+            # WHITELIST LOGIC: Only attack networks IN the whitelist
+            # If whitelist is not empty and this SSID is NOT in the whitelist, skip it
+            if self.whitelist_ssids and ssid not in self.whitelist_ssids:
+                logger.debug(f"Skipping {ssid} - not in whitelist")
                 return
             
             # Extract channel
@@ -248,10 +259,11 @@ class WiFiMonitor:
                 network_id = self.db.add_network(ssid, bssid, channel, encryption, signal)
                 self.networks[bssid]['id'] = network_id
                 
-                logger.info(f"New network discovered: {ssid} ({bssid}) on channel {channel} - {encryption}")
+                logger.info(f"✓ Target network: {ssid} ({bssid}) on channel {channel} - {encryption}")
                 
                 # Start handshake capture if WPA/WPA2
                 if 'WPA' in encryption and bssid not in self.active_captures:
+                    logger.info(f"→ Starting handshake capture for {ssid}")
                     self._start_handshake_capture(bssid, ssid, channel)
             else:
                 self.networks[bssid]['last_seen'] = datetime.now()
