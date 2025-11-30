@@ -82,10 +82,12 @@ def get_networks():
         
         networks = db.get_networks(whitelisted=whitelisted)
         
-        # Filter to only show networks seen in the last 5 minutes
+        # Filter to only show networks seen in the last 30 minutes (more reasonable)
         if recent_only:
-            from datetime import timedelta
-            cutoff_time = datetime.now() - timedelta(minutes=5)
+            from datetime import timedelta, timezone
+            # Database stores UTC timestamps, so compare in UTC
+            cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+            cutoff_time = cutoff_time.replace(tzinfo=None)  # Remove timezone for comparison
             
             filtered_networks = []
             for n in networks:
