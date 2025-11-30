@@ -839,12 +839,39 @@ chmod +x "$INSTALL_DIR/web/app.py"
 chmod 600 "$INSTALL_DIR/config/config.json"
 print_success "Permissions set"
 
-# Enable services
-print_status "Enabling services..."
+# DO NOT enable services at boot - they will kill WiFi!
+print_status "Configuring services (disabled by default)..."
 systemctl daemon-reload
-systemctl enable ${SERVICE_NAME}.service
-systemctl enable ${WEB_SERVICE_NAME}.service
-print_success "Services enabled"
+systemctl disable ${SERVICE_NAME}.service 2>/dev/null || true
+systemctl disable ${WEB_SERVICE_NAME}.service 2>/dev/null || true
+systemctl stop ${SERVICE_NAME}.service 2>/dev/null || true
+systemctl stop ${WEB_SERVICE_NAME}.service 2>/dev/null || true
+print_success "Services configured (will NOT start at boot)"
+
+echo ""
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}⚠️  IMPORTANT: PenDonn Services Are DISABLED${NC}"
+echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "${RED}Why? Starting PenDonn kills NetworkManager (your WiFi dies!)${NC}"
+echo ""
+echo -e "${BLUE}Services will NOT start automatically at boot.${NC}"
+echo -e "${BLUE}This keeps your WiFi/SSH working normally.${NC}"
+echo ""
+echo -e "${YELLOW}To use PenDonn:${NC}"
+echo "  1. Connect via SSH"
+echo "  2. Manually start services:"
+echo "     ${BLUE}sudo systemctl start pendonn pendonn-web${NC}"
+echo "  3. ${RED}WARNING: This will disconnect your SSH!${NC}"
+echo "  4. Access web interface from another device"
+echo ""
+echo -e "${YELLOW}To stop PenDonn and restore WiFi:${NC}"
+echo "  1. Connect via ethernet or local access"
+echo "  2. Stop services:"
+echo "     ${BLUE}sudo systemctl stop pendonn pendonn-web${NC}"
+echo "  3. Restart NetworkManager:"
+echo "     ${BLUE}sudo systemctl restart NetworkManager${NC}"
+echo ""
 
 # Interactive Configuration Wizard
 echo ""
