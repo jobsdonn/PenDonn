@@ -63,13 +63,23 @@ class WiFiScanner:
             current_iface = None
             
             for line in result.stdout.split('\n'):
-                if ': wlan' in line:
-                    current_iface = line.split(': ')[1].split('@')[0]
+                # Look for interface lines like "3: wlan0: <...>"
+                if ': wlan' in line and '<' in line:
+                    parts = line.split(': ')
+                    if len(parts) >= 2:
+                        current_iface = parts[1].split(':')[0].split('@')[0]
+                        
+                # Look for MAC address on following line
                 elif 'link/ether' in line and current_iface:
                     mac = line.strip().split()[1].lower()
+                    
+                    # Exclude management interface by MAC
                     if mac != self.management_mac.lower():
                         interfaces.append(current_iface)
                         logger.info(f"Found external WiFi: {current_iface} ({mac})")
+                    else:
+                        logger.info(f"Skipping management interface: {current_iface} ({mac})")
+                    
                     current_iface = None
             
             return interfaces
