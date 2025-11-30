@@ -190,6 +190,7 @@ class PasswordCracker:
             # Convert using hcxpcapngtool
             if not os.path.exists(hash_file):
                 try:
+                    # Try hcxpcapngtool (newer, for 22000 format)
                     result = subprocess.run(
                         ['hcxpcapngtool', '-o', hash_file, capture_file],
                         capture_output=True,
@@ -197,9 +198,25 @@ class PasswordCracker:
                         timeout=30
                     )
                     
-                    if result.returncode != 0 or not os.path.exists(hash_file):
-                        logger.warning(f"hcxpcapngtool failed for {handshake_id}: {result.stderr[:100]}")
-                        return None
+                    if result.returncode != 0:
+                        stderr = result.stderr.strip() if result.stderr else "Unknown error"
+                        logger.debug(f"hcxpcapngtool output: {stderr[:200]}")
+                        
+                        # Try hcxpcaptool (older version) with different syntax
+                        try:
+                            result = subprocess.run(
+                                ['hcxpcaptool', '-z', hash_file, capture_file],
+                                capture_output=True,
+                                text=True,
+                                timeout=30
+                            )
+                            if result.returncode != 0:
+                                logger.warning(f"hcxpcaptool also failed for {handshake_id}")
+                                return None
+                        except FileNotFoundError:
+                            logger.warning(f"Neither hcxpcapngtool nor hcxpcaptool found for {handshake_id}")
+                            return None
+                            
                 except FileNotFoundError:
                     logger.error("hcxpcapngtool not found. Install with: sudo apt install hcxtools")
                     return None
@@ -270,6 +287,7 @@ class PasswordCracker:
             
             if not os.path.exists(hash_file):
                 try:
+                    # Try hcxpcapngtool (newer, for 22000 format)
                     result = subprocess.run(
                         ['hcxpcapngtool', '-o', hash_file, capture_file],
                         capture_output=True,
@@ -277,9 +295,25 @@ class PasswordCracker:
                         timeout=30
                     )
                     
-                    if result.returncode != 0 or not os.path.exists(hash_file):
-                        logger.warning(f"hcxpcapngtool failed: {result.stderr[:100]}")
-                        return None
+                    if result.returncode != 0:
+                        stderr = result.stderr.strip() if result.stderr else "Unknown error"
+                        logger.debug(f"hcxpcapngtool output: {stderr[:200]}")
+                        
+                        # Try hcxpcaptool (older version)
+                        try:
+                            result = subprocess.run(
+                                ['hcxpcaptool', '-z', hash_file, capture_file],
+                                capture_output=True,
+                                text=True,
+                                timeout=30
+                            )
+                            if result.returncode != 0:
+                                logger.warning(f"hcxpcaptool also failed")
+                                return None
+                        except FileNotFoundError:
+                            logger.warning(f"Neither hcxpcapngtool nor hcxpcaptool found")
+                            return None
+                            
                 except FileNotFoundError:
                     logger.error("hcxpcapngtool not found. Install with: sudo apt install hcxtools")
                     return None
