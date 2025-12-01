@@ -342,13 +342,13 @@ class WiFiScanner:
             # Start airodump-ng to capture handshake
             # Capture ALL traffic on the channel (no filters!)
             # Filters exclude critical frames needed for hash conversion
-            # We'll verify the correct handshake was captured using aircrack-ng
+            # We'll verify with hcxpcapngtool (more reliable than aircrack-ng)
             # --write-interval: force writes every second to ensure all frames captured
             cmd = [
                 'airodump-ng',
                 '--channel', str(channel),
                 '--write', capture_base,
-                '--output-format', 'pcap',  # Use pcap instead of cap for better compatibility
+                '--output-format', 'cap',  # cap format (airodump ignores pcap anyway)
                 '--write-interval', '1',  # Write every second to capture all frames
                 self.interface
             ]
@@ -363,8 +363,8 @@ class WiFiScanner:
                 logger.error(f"Failed to start capture for {ssid}")
                 return
             
-            # Airodump with pcap format creates -01.pcap file
-            capture_file = capture_base + '-01.pcap'
+            # Airodump creates -01.cap file regardless of format setting
+            capture_file = capture_base + '-01.cap'
             
             self.active_captures[bssid] = {
                 'ssid': ssid,
@@ -469,16 +469,26 @@ class WiFiScanner:
             if not os.path.exists(capture_file):
                 return False
             
-            # Use aircrack-ng to verify handshake
+            # Use hcxpcapngtool to verify - it's more reliable than aircrack-ng
+            # It can detect PMKID and partial EAPOL handshakes
+            test_output = '/tmp/test_' + os.path.basename(capture_file) + '.22000'
+            
             result = subprocess.run([
-                'aircrack-ng',
+                'hcxpcapngtool',
+                '-o', test_output,
                 capture_file
             ], capture_output=True, text=True, timeout=10)
             
-            output = result.stdout + result.stderr
+            # Check if hash file was created and has content
+            if os.path.exists(test_output) and os.path.getsize(test_output) > 0:
+                # Clean up test file
+                try:
+                    os.remove(test_output)
+                except:
+                    pass
+                return True
             
-            # Check for handshake indicators
-            return 'handshake' in output.lower() or '1 handshake' in output.lower()
+            return False
         
         except Exception as e:
             logger.debug(f"Handshake check error: {e}")
