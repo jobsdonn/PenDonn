@@ -440,13 +440,13 @@ class WiFiScanner:
                     
                     # Check for handshake
                     if capture_info.get('deauth_sent', False):
-                        # Wait at least 15 seconds after deauth for full reconnection
+                        # Wait at least 30 seconds after deauth for full reconnection
                         # (authentication + association + 4-way handshake)
                         deauth_time = capture_info.get('deauth_time', 0)
                         time_since_deauth = time.time() - deauth_time
                         
-                        if time_since_deauth < 15:
-                            logger.debug(f"⏳ Waiting for {ssid} to reconnect ({int(time_since_deauth)}s)")
+                        if time_since_deauth < 30:
+                            logger.info(f"⏳ Waiting for {ssid} to reconnect ({int(time_since_deauth)}s)")
                             continue
                         
                         has_handshake = self._check_handshake(capture_info['capture_file'])
@@ -467,12 +467,14 @@ class WiFiScanner:
         """Check if capture file contains valid handshake"""
         try:
             if not os.path.exists(capture_file):
+                logger.warning(f"Capture file not found: {capture_file}")
                 return False
             
             # Use hcxpcapngtool to verify - it's more reliable than aircrack-ng
             # It can detect PMKID and partial EAPOL handshakes
             test_output = '/tmp/test_' + os.path.basename(capture_file) + '.22000'
             
+            logger.debug(f"Running hcxpcapngtool on {os.path.basename(capture_file)}...")
             result = subprocess.run([
                 'hcxpcapngtool',
                 '-o', test_output,
@@ -481,12 +483,19 @@ class WiFiScanner:
             
             # Check if hash file was created and has content
             if os.path.exists(test_output) and os.path.getsize(test_output) > 0:
+                logger.info(f"✓ Valid handshake hash created ({os.path.getsize(test_output)} bytes)")
                 # Clean up test file
                 try:
                     os.remove(test_output)
                 except:
                     pass
                 return True
+            
+            # Log why verification failed
+            if 'no hashes written' in result.stdout.lower():
+                logger.debug(f"No EAPOL frames in capture yet")
+            else:
+                logger.debug(f"hcxpcapngtool: {result.stdout[:200]}")
             
             return False
         
