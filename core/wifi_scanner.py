@@ -343,11 +343,13 @@ class WiFiScanner:
             # Capture ALL traffic on the channel (no filters!)
             # Filters exclude critical frames needed for hash conversion
             # We'll verify the correct handshake was captured using aircrack-ng
+            # --write-interval: force writes every second to ensure all frames captured
             cmd = [
                 'airodump-ng',
                 '--channel', str(channel),
                 '--write', capture_base,
-                '--output-format', 'cap',
+                '--output-format', 'pcap',  # Use pcap instead of cap for better compatibility
+                '--write-interval', '1',  # Write every second to capture all frames
                 self.interface
             ]
             
@@ -361,7 +363,8 @@ class WiFiScanner:
                 logger.error(f"Failed to start capture for {ssid}")
                 return
             
-            capture_file = capture_base + '-01.cap'
+            # Airodump with pcap format creates -01.pcap file
+            capture_file = capture_base + '-01.pcap'
             
             self.active_captures[bssid] = {
                 'ssid': ssid,
