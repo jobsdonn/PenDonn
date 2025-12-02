@@ -200,8 +200,8 @@ class PasswordCracker:
             
             logger.info(f"Cracking with John the Ripper: {handshake['ssid']}")
             
-            # Convert to hashcat 22000 format (modern WPA/WPA2)
-            # This format works for both John and Hashcat
+            # For John, we'll use the cap file directly or convert to john format
+            # John can work with PCAP files using wpapsk format
             hash_file = capture_file.replace('.cap', '.22000')
             
             # Convert using hcxpcapngtool
@@ -247,46 +247,70 @@ class PasswordCracker:
                 logger.warning(f"Could not create hash file for {handshake_id}: file doesn't exist or is empty")
                 return None
             
-            # Run John the Ripper with WPA-PBKDF2-PMKID+EAPOL format
+            # Run John the Ripper - try with wpapsk-opencl format first (fastest)
+            # Then fall back to wpapsk if opencl not available
             start_time = time.time()
             
-            cmd = [
-                'john',
-                '--wordlist=' + self.wordlist,
-                '--format=WPA-PBKDF2-PMKID+EAPOL',  # Correct format for hashcat 22000
-                hash_file
-            ]
+            formats_to_try = ['wpapsk-opencl', 'wpapsk']
             
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            self.active_cracks[handshake_id]['process'] = process
-            
-            # Wait for completion (with timeout)
-            stdout, stderr = process.communicate(timeout=3600)  # 1 hour timeout
-            
-            crack_time = time.time() - start_time
-            
-            # Check if password was found
-            show_cmd = ['john', '--show', '--format=WPA-PBKDF2-PMKID+EAPOL', hash_file]
-            result = subprocess.run(show_cmd, capture_output=True, text=True)
-            
-            if result.stdout:
-                # Parse password from output
-                # Format is typically: hash:password
-                for line in result.stdout.split('\n'):
-                    if ':' in line and 'password' not in line.lower() and line.strip():
-                        # Split and get the last part after last colon
-                        parts = line.split(':')
-                        if len(parts) >= 2:
-                            password = parts[-1].strip()
-                            if password and password != '':
-                                logger.info(f"John found password: {password}")
-                                return (password, crack_time)
+            for john_format in formats_to_try:
+                cmd = [
+                    'john',
+                    '--wordlist=' + self.wordlist,
+                    f'--format={john_format}',
+                    hash_file
+                ]
+                
+                logger.info(f"Running John command: {' '.join(cmd)}")
+                
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                self.active_cracks[handshake_id]['process'] = process
+                
+                # Wait for completion (with timeout)
+                stdout, stderr = process.communicate(timeout=3600)  # 1 hour timeout
+                
+                # Log John's output for debugging
+                if stdout:
+                    logger.info(f"John stdout ({john_format}): {stdout[:500]}")
+                if stderr:
+                    logger.info(f"John stderr ({john_format}): {stderr[:500]}")
+                
+                # Check for format error
+                if 'Unknown ciphertext format' in stderr or 'invalid UTF-8' in stderr:
+                    logger.warning(f"Format {john_format} not working, trying next...")
+                    continue
+                
+                crack_time = time.time() - start_time
+                
+                # Check if password was found
+                show_cmd = ['john', '--show', f'--format={john_format}', hash_file]
+                logger.info(f"Running John show command: {' '.join(show_cmd)}")
+                result = subprocess.run(show_cmd, capture_output=True, text=True)
+                
+                logger.info(f"John show output: {result.stdout[:500]}")
+                
+                if result.stdout and 'password hash' not in result.stdout.lower():
+                    # Parse password from output
+                    # Format is typically: hash:password
+                    for line in result.stdout.split('\n'):
+                        if ':' in line and 'password' not in line.lower() and line.strip():
+                            # Split and get the last part after last colon
+                            parts = line.split(':')
+                            if len(parts) >= 2:
+                                password = parts[-1].strip()
+                                if password and password != '' and 'cracked' not in password.lower():
+                                    logger.info(f"John found password: {password}")
+                                    return (password, crack_time)
+                
+                # If we got here without errors, format worked but no password found
+                if 'Unknown ciphertext format' not in stderr:
+                    break
             
             return None
         
@@ -370,6 +394,10 @@ class PasswordCracker:
             # Output file for cracked passwords
             output_file = hash_file + '.cracked'
             
+            # Remove old output file if it exists
+            if os.path.exists(output_file):
+                os.remove(output_file)
+            
             # Run Hashcat
             start_time = time.time()
             
@@ -383,6 +411,8 @@ class PasswordCracker:
                 '--force',  # Force if no GPU
                 '--quiet'
             ]
+            
+            logger.info(f"Running Hashcat command: {' '.join(cmd)}")
             
             process = subprocess.Popen(
                 cmd,
@@ -398,10 +428,19 @@ class PasswordCracker:
             
             crack_time = time.time() - start_time
             
+            # Log Hashcat's output for debugging
+            if stdout:
+                logger.debug(f"Hashcat stdout: {stdout[:500]}")
+            if stderr:
+                logger.debug(f"Hashcat stderr: {stderr[:500]}")
+            
+            logger.info(f"Hashcat exit code: {process.returncode}")
+            
             # Check if password was found
             if os.path.exists(output_file):
                 with open(output_file, 'r') as f:
                     content = f.read().strip()
+                    logger.info(f"Hashcat output file content: {content[:200]}")
                     if content:
                         # Parse hashcat output format
                         # Format for 22000: hash*data:password
@@ -412,6 +451,8 @@ class PasswordCracker:
                             if password and password != '':
                                 logger.info(f"Hashcat found password: {password}")
                                 return (password, crack_time)
+            else:
+                logger.warning(f"Hashcat output file not created: {output_file}")
             
             return None
         
