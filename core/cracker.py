@@ -200,57 +200,42 @@ class PasswordCracker:
             
             logger.info(f"Cracking with John the Ripper: {handshake['ssid']}")
             
-            # For John, we'll use the cap file directly or convert to john format
-            # John can work with PCAP files using wpapsk format
-            hash_file = capture_file.replace('.cap', '.22000')
+            # John can't read hashcat 22000 format directly
+            # Use hcx2john to convert cap to john format
+            john_hash_file = capture_file.replace('.cap', '.john')
             
-            # Convert using hcxpcapngtool
-            if not os.path.exists(hash_file):
+            # Convert using hcx2john
+            if not os.path.exists(john_hash_file):
                 try:
-                    # Try hcxpcapngtool (newer, for 22000 format)
+                    # Use hcx2john to create John-compatible hash
                     result = subprocess.run(
-                        ['hcxpcapngtool', '-o', hash_file, capture_file],
+                        ['hcx2john', capture_file],
                         capture_output=True,
                         text=True,
                         timeout=30
                     )
                     
-                    if result.returncode != 0:
-                        stderr = result.stderr.strip() if result.stderr else "Unknown error"
-                        stdout = result.stdout.strip() if result.stdout else ""
-                        logger.warning(f"hcxpcapngtool failed for {handshake_id}: {stderr[:200]}")
-                        logger.debug(f"hcxpcapngtool stdout: {stdout[:200]}")
-                        
-                        # Try hcxpcaptool (older version) with different syntax
-                        try:
-                            result = subprocess.run(
-                                ['hcxpcaptool', '-z', hash_file, capture_file],
-                                capture_output=True,
-                                text=True,
-                                timeout=30
-                            )
-                            if result.returncode != 0:
-                                logger.warning(f"hcxpcaptool also failed for {handshake_id}")
-                                return None
-                        except FileNotFoundError:
-                            logger.warning(f"Neither hcxpcapngtool nor hcxpcaptool found for {handshake_id}")
-                            return None
+                    if result.returncode == 0 and result.stdout:
+                        # Save John hash to file
+                        with open(john_hash_file, 'w') as f:
+                            f.write(result.stdout)
+                        logger.info(f"Successfully converted to John format: {john_hash_file}")
                     else:
-                        # Log successful conversion
-                        logger.info(f"Successfully converted {capture_file} to {hash_file}")
+                        logger.warning(f"hcx2john failed for {handshake_id}")
+                        return None
                             
                 except FileNotFoundError:
-                    logger.error("hcxpcapngtool not found. Install with: sudo apt install hcxtools")
+                    logger.error("hcx2john not found. Install with: sudo apt install hcxtools")
                     return None
             
-            if not os.path.exists(hash_file) or os.path.getsize(hash_file) == 0:
-                logger.warning(f"Could not create hash file for {handshake_id}: file doesn't exist or is empty")
+            if not os.path.exists(john_hash_file) or os.path.getsize(john_hash_file) == 0:
+                logger.warning(f"Could not create John hash file for {handshake_id}")
                 return None
             
-            # Run John the Ripper - try with wpapsk-opencl format first (fastest)
-            # Then fall back to wpapsk if opencl not available
+            # Run John the Ripper with WPAPSK format
             start_time = time.time()
             
+            # Try wpapsk-opencl first, then wpapsk
             formats_to_try = ['wpapsk-opencl', 'wpapsk']
             
             for john_format in formats_to_try:
@@ -258,7 +243,7 @@ class PasswordCracker:
                     'john',
                     '--wordlist=' + self.wordlist,
                     f'--format={john_format}',
-                    hash_file
+                    john_hash_file
                 ]
                 
                 logger.info(f"Running John command: {' '.join(cmd)}")
@@ -282,29 +267,28 @@ class PasswordCracker:
                     logger.info(f"John stderr ({john_format}): {stderr[:500]}")
                 
                 # Check for format error
-                if 'Unknown ciphertext format' in stderr or 'invalid UTF-8' in stderr:
+                if 'Unknown ciphertext format' in stderr or 'No password hashes loaded' in stderr:
                     logger.warning(f"Format {john_format} not working, trying next...")
                     continue
                 
                 crack_time = time.time() - start_time
                 
                 # Check if password was found
-                show_cmd = ['john', '--show', f'--format={john_format}', hash_file]
+                show_cmd = ['john', '--show', f'--format={john_format}', john_hash_file]
                 logger.info(f"Running John show command: {' '.join(show_cmd)}")
                 result = subprocess.run(show_cmd, capture_output=True, text=True)
                 
                 logger.info(f"John show output: {result.stdout[:500]}")
                 
-                if result.stdout and 'password hash' not in result.stdout.lower():
+                if result.stdout and '0 password hashes cracked' not in result.stdout:
                     # Parse password from output
-                    # Format is typically: hash:password
+                    # Format is typically: SSID:password
                     for line in result.stdout.split('\n'):
                         if ':' in line and 'password' not in line.lower() and line.strip():
-                            # Split and get the last part after last colon
                             parts = line.split(':')
                             if len(parts) >= 2:
                                 password = parts[-1].strip()
-                                if password and password != '' and 'cracked' not in password.lower():
+                                if password and password != '':
                                     logger.info(f"John found password: {password}")
                                     return (password, crack_time)
                 
@@ -408,8 +392,7 @@ class PasswordCracker:
                 hash_file,
                 self.wordlist,
                 '-o', output_file,
-                '--force',  # Force if no GPU
-                '--quiet'
+                '--force'  # Force if no GPU, removed --quiet to see errors
             ]
             
             logger.info(f"Running Hashcat command: {' '.join(cmd)}")
@@ -430,9 +413,9 @@ class PasswordCracker:
             
             # Log Hashcat's output for debugging
             if stdout:
-                logger.debug(f"Hashcat stdout: {stdout[:500]}")
+                logger.info(f"Hashcat stdout: {stdout[:1000]}")
             if stderr:
-                logger.debug(f"Hashcat stderr: {stderr[:500]}")
+                logger.info(f"Hashcat stderr: {stderr[:1000]}")
             
             logger.info(f"Hashcat exit code: {process.returncode}")
             
