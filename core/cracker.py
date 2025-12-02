@@ -225,13 +225,13 @@ class PasswordCracker:
                 logger.warning(f"Could not create hash file for {handshake_id}")
                 return None
             
-            # Run John the Ripper with hashcat format
+            # Run John the Ripper with WPA-PBKDF2-PMKID+EAPOL format
             start_time = time.time()
             
             cmd = [
                 'john',
                 '--wordlist=' + self.wordlist,
-                '--format=hashcat',  # John can read hashcat 22000 format
+                '--format=WPA-PBKDF2-PMKID+EAPOL',  # Correct format for hashcat 22000
                 hash_file
             ]
             
@@ -250,17 +250,20 @@ class PasswordCracker:
             crack_time = time.time() - start_time
             
             # Check if password was found
-            show_cmd = ['john', '--show', '--format=hashcat', hash_file]
+            show_cmd = ['john', '--show', '--format=WPA-PBKDF2-PMKID+EAPOL', hash_file]
             result = subprocess.run(show_cmd, capture_output=True, text=True)
             
             if result.stdout:
                 # Parse password from output
+                # Format is typically: hash:password
                 for line in result.stdout.split('\n'):
-                    if ':' in line and 'password' not in line.lower():
+                    if ':' in line and 'password' not in line.lower() and line.strip():
+                        # Split and get the last part after last colon
                         parts = line.split(':')
                         if len(parts) >= 2:
                             password = parts[-1].strip()
-                            if password:
+                            if password and password != '':
+                                logger.info(f"John found password: {password}")
                                 return (password, crack_time)
             
             return None
@@ -359,11 +362,13 @@ class PasswordCracker:
                     content = f.read().strip()
                     if content:
                         # Parse hashcat output format
-                        # Format: hash:password or hash:hex:password
-                        parts = content.split(':')
-                        if len(parts) >= 2:
+                        # Format for 22000: hash*data:password
+                        # The password is after the last colon
+                        if ':' in content:
+                            parts = content.split(':')
                             password = parts[-1].strip()
-                            if password:
+                            if password and password != '':
+                                logger.info(f"Hashcat found password: {password}")
                                 return (password, crack_time)
             
             return None
