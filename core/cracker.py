@@ -133,11 +133,13 @@ class PasswordCracker:
                 # Try each enabled cracking engine
                 cracked = False
                 for engine in self.engines:
+                    logger.info(f"Attempting to crack with engine: {engine}")
                     if engine == 'john':
                         result = self._crack_with_john(handshake)
                     elif engine == 'hashcat':
                         result = self._crack_with_hashcat(handshake)
                     else:
+                        logger.warning(f"Unknown cracking engine: {engine}")
                         continue
                     
                     if result:
@@ -181,6 +183,21 @@ class PasswordCracker:
             handshake_id = handshake['id']
             capture_file = handshake['file_path']
             
+            # Wait a bit and verify file exists and has content
+            for i in range(10):  # Try for up to 10 seconds
+                if os.path.exists(capture_file) and os.path.getsize(capture_file) > 1000:
+                    break
+                logger.debug(f"Waiting for capture file {capture_file} to be ready...")
+                time.sleep(1)
+            
+            if not os.path.exists(capture_file):
+                logger.error(f"Capture file not found: {capture_file}")
+                return None
+            
+            if os.path.getsize(capture_file) < 1000:
+                logger.error(f"Capture file too small: {capture_file} ({os.path.getsize(capture_file)} bytes)")
+                return None
+            
             logger.info(f"Cracking with John the Ripper: {handshake['ssid']}")
             
             # Convert to hashcat 22000 format (modern WPA/WPA2)
@@ -200,7 +217,9 @@ class PasswordCracker:
                     
                     if result.returncode != 0:
                         stderr = result.stderr.strip() if result.stderr else "Unknown error"
-                        logger.debug(f"hcxpcapngtool output: {stderr[:200]}")
+                        stdout = result.stdout.strip() if result.stdout else ""
+                        logger.warning(f"hcxpcapngtool failed for {handshake_id}: {stderr[:200]}")
+                        logger.debug(f"hcxpcapngtool stdout: {stdout[:200]}")
                         
                         # Try hcxpcaptool (older version) with different syntax
                         try:
@@ -216,13 +235,16 @@ class PasswordCracker:
                         except FileNotFoundError:
                             logger.warning(f"Neither hcxpcapngtool nor hcxpcaptool found for {handshake_id}")
                             return None
+                    else:
+                        # Log successful conversion
+                        logger.info(f"Successfully converted {capture_file} to {hash_file}")
                             
                 except FileNotFoundError:
                     logger.error("hcxpcapngtool not found. Install with: sudo apt install hcxtools")
                     return None
             
             if not os.path.exists(hash_file) or os.path.getsize(hash_file) == 0:
-                logger.warning(f"Could not create hash file for {handshake_id}")
+                logger.warning(f"Could not create hash file for {handshake_id}: file doesn't exist or is empty")
                 return None
             
             # Run John the Ripper with WPA-PBKDF2-PMKID+EAPOL format
@@ -283,6 +305,21 @@ class PasswordCracker:
             handshake_id = handshake['id']
             capture_file = handshake['file_path']
             
+            # Wait a bit and verify file exists and has content
+            for i in range(10):  # Try for up to 10 seconds
+                if os.path.exists(capture_file) and os.path.getsize(capture_file) > 1000:
+                    break
+                logger.debug(f"Waiting for capture file {capture_file} to be ready...")
+                time.sleep(1)
+            
+            if not os.path.exists(capture_file):
+                logger.error(f"Capture file not found: {capture_file}")
+                return None
+            
+            if os.path.getsize(capture_file) < 1000:
+                logger.error(f"Capture file too small: {capture_file} ({os.path.getsize(capture_file)} bytes)")
+                return None
+            
             logger.info(f"Cracking with Hashcat: {handshake['ssid']}")
             
             # Convert to hashcat 22000 format
@@ -300,7 +337,9 @@ class PasswordCracker:
                     
                     if result.returncode != 0:
                         stderr = result.stderr.strip() if result.stderr else "Unknown error"
-                        logger.debug(f"hcxpcapngtool output: {stderr[:200]}")
+                        stdout = result.stdout.strip() if result.stdout else ""
+                        logger.warning(f"hcxpcapngtool failed for hashcat: {stderr[:200]}")
+                        logger.debug(f"hcxpcapngtool stdout: {stdout[:200]}")
                         
                         # Try hcxpcaptool (older version)
                         try:
@@ -316,13 +355,16 @@ class PasswordCracker:
                         except FileNotFoundError:
                             logger.warning(f"Neither hcxpcapngtool nor hcxpcaptool found")
                             return None
+                    else:
+                        # Log successful conversion
+                        logger.info(f"Successfully converted {capture_file} to {hash_file} for hashcat")
                             
                 except FileNotFoundError:
                     logger.error("hcxpcapngtool not found. Install with: sudo apt install hcxtools")
                     return None
             
             if not os.path.exists(hash_file) or os.path.getsize(hash_file) == 0:
-                logger.warning(f"Could not create Hashcat format file for {handshake_id}")
+                logger.warning(f"Could not create Hashcat format file for {handshake_id}: file doesn't exist or is empty")
                 return None
             
             # Output file for cracked passwords
