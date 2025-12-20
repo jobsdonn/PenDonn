@@ -280,8 +280,11 @@ class WiFiScanner:
                     
                     # Start handshake capture if WPA/WPA2 and in whitelist (or whitelist empty)
                     if 'WPA' in enc_type and bssid not in self.active_captures:
+                        # Skip if password already cracked
+                        if self.db.get_password_for_network(bssid):
+                            logger.debug(f"Network {essid} already cracked - skipping")
                         # Only attack if no whitelist or network is in whitelist
-                        if not self.whitelist_ssids or essid in self.whitelist_ssids:
+                        elif not self.whitelist_ssids or essid in self.whitelist_ssids:
                             self._start_handshake_capture(bssid, essid, channel_num)
                         else:
                             logger.debug(f"Network {essid} discovered but not attacking - not in whitelist")
@@ -585,6 +588,12 @@ class WiFiScanner:
         """Stop an active capture"""
         if bssid in self.active_captures:
             self._finalize_capture(bssid, success=False)
+    
+    def stop_capture_for_network(self, bssid: str):
+        """Stop capturing handshakes for a network (e.g., after password cracked)"""
+        if bssid in self.active_captures:
+            logger.info(f"Stopping handshake capture for {bssid} - password cracked")
+            self._stop_capture(bssid)
     
     def get_statistics(self) -> Dict:
         """Get current statistics"""

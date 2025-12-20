@@ -80,7 +80,9 @@ class PenDonn:
             from core.mock_cracker import MockPasswordCracker
             self.cracker = MockPasswordCracker(self.config, self.db)
         else:
-            self.cracker = PasswordCracker(self.config, self.db)
+            # Cracker needs wifi_scanner reference to stop captures when password is cracked
+            # We'll set it after wifi_monitor is initialized
+            self.cracker = PasswordCracker(self.config, self.db, self.wifi_monitor)
         
         logger.info("Initializing network enumerator...")
         self.enumerator = NetworkEnumerator(self.config, self.db, self.plugin_manager)

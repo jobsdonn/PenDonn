@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 class PasswordCracker:
     """Password cracking with John the Ripper and Hashcat"""
     
-    def __init__(self, config: Dict, database):
+    def __init__(self, config: Dict, database, wifi_scanner=None):
         """Initialize password cracker"""
         self.config = config
         self.db = database
+        self.wifi_scanner = wifi_scanner
         
         self.enabled = config['cracking']['enabled']
         self.engines = config['cracking']['engines']
@@ -148,6 +149,13 @@ class PasswordCracker:
         """Add handshake to cracking queue"""
         try:
             handshake_id = handshake['id']
+            bssid = handshake['bssid']
+            ssid = handshake['ssid']
+            
+            # Skip if password already cracked for this network
+            if self.db.get_password_for_network(bssid):
+                logger.info(f"Password already cracked for {ssid} ({bssid}) - skipping handshake {handshake_id}")
+                return
             
             if handshake_id not in self.active_cracks:
                 self.crack_queue.put(handshake)
@@ -207,6 +215,11 @@ class PasswordCracker:
                         )
                         
                         logger.info(f"Password cracked for {handshake['ssid']}: {password}")
+                        
+                        # Stop capturing handshakes for this network
+                        if self.wifi_scanner:
+                            self.wifi_scanner.stop_capture_for_network(handshake['bssid'])
+                        
                         break
                 
                 # Update status
