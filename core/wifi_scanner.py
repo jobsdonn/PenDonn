@@ -409,6 +409,19 @@ class WiFiScanner:
             except Exception as e:
                 logger.warning(f"Could not set channel on attack interface: {e}")
             
+            # Verify interface is in monitor mode before attempting deauth
+            try:
+                mode_check = subprocess.run(['iw', 'dev', self.attack_interface, 'info'],
+                                          capture_output=True, text=True, timeout=5)
+                if 'type monitor' not in mode_check.stdout.lower():
+                    logger.error(f"{self.attack_interface} is not in monitor mode! Attempting to fix...")
+                    subprocess.run(['ip', 'link', 'set', self.attack_interface, 'down'], timeout=5)
+                    subprocess.run(['iw', self.attack_interface, 'set', 'monitor', 'control'], timeout=5)
+                    subprocess.run(['ip', 'link', 'set', self.attack_interface, 'up'], timeout=5)
+                    time.sleep(1)
+            except Exception as e:
+                logger.warning(f"Could not verify/fix monitor mode: {e}")
+            
             # Send deauth packets to broadcast (all clients)
             # --deauth: number of deauth packets to send (increased to 20 for better coverage)
             # -a: AP MAC address
@@ -437,7 +450,12 @@ class WiFiScanner:
                 if result2.returncode == 0:
                     logger.info(f"✓ Follow-up deauth sent to {ssid}")
             else:
-                logger.warning(f"Deauth failed for {ssid}: {result.stderr[:200]}")
+                # Log the error but don't spam - "Operation not permitted" usually means temporary issue
+                error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+                if "Operation not permitted" in error_msg:
+                    logger.debug(f"Deauth temporarily unavailable for {ssid} (interface busy)")
+                else:
+                    logger.warning(f"Deauth failed for {ssid}: {error_msg}")
                 capture_info['deauth_sent'] = True  # Mark as sent anyway
                 capture_info['deauth_time'] = time.time()
         
