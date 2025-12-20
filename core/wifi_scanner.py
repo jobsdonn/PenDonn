@@ -450,17 +450,24 @@ class WiFiScanner:
                 if result2.returncode == 0:
                     logger.info(f"✓ Follow-up deauth sent to {ssid}")
             else:
-                # Log the error but don't spam - "Operation not permitted" usually means temporary issue
-                error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+                # Log the error with more detail
+                error_msg = result.stderr.strip() if result.stderr else ""
+                stdout_msg = result.stdout.strip() if result.stdout else ""
+                
                 if "Operation not permitted" in error_msg:
                     logger.debug(f"Deauth temporarily unavailable for {ssid} (interface busy)")
+                elif error_msg or stdout_msg:
+                    logger.warning(f"Deauth failed for {ssid}: stderr={error_msg[:200]}, stdout={stdout_msg[:200]}, returncode={result.returncode}")
                 else:
-                    logger.warning(f"Deauth failed for {ssid}: {error_msg}")
+                    logger.warning(f"Deauth failed for {ssid}: No output, returncode={result.returncode}")
+                    
                 capture_info['deauth_sent'] = True  # Mark as sent anyway
                 capture_info['deauth_time'] = time.time()
         
+        except subprocess.TimeoutExpired:
+            logger.error(f"Deauth timeout for {ssid} (aireplay-ng took too long)")
         except Exception as e:
-            logger.error(f"Deauth error for {ssid}: {e}")
+            logger.error(f"Deauth error for {ssid}: {type(e).__name__}: {e}", exc_info=True)
     
     def _capture_monitor(self):
         """Monitor active captures and check for handshakes"""
