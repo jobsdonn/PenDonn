@@ -29,7 +29,7 @@
   },
   "cracking": {
     "enabled": true,
-    "engines": ["john", "hashcat"],
+    "engines": ["aircrack-ng", "hashcat", "john"],
     "wordlist_path": "/usr/share/wordlists/rockyou.txt",
     "auto_start_cracking": true,
     "max_concurrent_cracks": 2,

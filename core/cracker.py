@@ -186,6 +186,8 @@ class PasswordCracker:
                         result = self._crack_with_john(handshake)
                     elif engine == 'hashcat':
                         result = self._crack_with_hashcat(handshake)
+                    elif engine == 'aircrack-ng':
+                        result = self._crack_with_aircrack(handshake)
                     else:
                         logger.warning(f"Unknown cracking engine: {engine}")
                         continue
@@ -502,6 +504,103 @@ class PasswordCracker:
             return None
         except Exception as e:
             logger.error(f"Hashcat error: {e}")
+            return None
+    
+    def _crack_with_aircrack(self, handshake: Dict) -> Optional[tuple]:
+        """Crack password using aircrack-ng (most reliable on Raspberry Pi)"""
+        try:
+            handshake_id = handshake['id']
+            capture_file = handshake['file_path']
+            ssid = handshake['ssid']
+            bssid = handshake['bssid']
+            
+            # Wait a bit and verify file exists and has content
+            for i in range(10):  # Try for up to 10 seconds
+                if os.path.exists(capture_file) and os.path.getsize(capture_file) > 1000:
+                    break
+                logger.debug(f"Waiting for capture file {capture_file} to be ready...")
+                time.sleep(1)
+            
+            if not os.path.exists(capture_file):
+                logger.error(f"Capture file not found: {capture_file}")
+                return None
+            
+            if os.path.getsize(capture_file) < 1000:
+                logger.error(f"Capture file too small: {capture_file} ({os.path.getsize(capture_file)} bytes)")
+                return None
+            
+            logger.info(f"Cracking with aircrack-ng: {ssid}")
+            
+            # Run aircrack-ng
+            start_time = time.time()
+            
+            cmd = [
+                'aircrack-ng',
+                capture_file,
+                '-w', self.wordlist,
+                '-b', bssid,  # Specify BSSID to avoid interactive prompt
+                '-l', f'/tmp/cracked_{handshake_id}.txt'  # Output file for password
+            ]
+            
+            logger.info(f"Running aircrack-ng command: {' '.join(cmd)}")
+            
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            self.active_cracks[handshake_id]['process'] = process
+            
+            # Wait for completion
+            stdout, stderr = process.communicate(timeout=3600)  # 1 hour timeout
+            
+            crack_time = time.time() - start_time
+            
+            # Log aircrack-ng's output for debugging
+            if stdout:
+                logger.info(f"aircrack-ng stdout: {stdout[:1000]}")
+            if stderr:
+                logger.info(f"aircrack-ng stderr: {stderr[:1000]}")
+            
+            logger.info(f"aircrack-ng exit code: {process.returncode}")
+            
+            # Check output file first
+            output_file = f'/tmp/cracked_{handshake_id}.txt'
+            if os.path.exists(output_file):
+                with open(output_file, 'r') as f:
+                    password = f.read().strip()
+                    if password:
+                        logger.info(f"aircrack-ng found password: {password}")
+                        os.remove(output_file)  # Clean up
+                        return (password, crack_time)
+            
+            # Also check stdout for "KEY FOUND" message
+            if 'KEY FOUND!' in stdout:
+                # Extract password from output
+                # Format: KEY FOUND! [ password ]
+                for line in stdout.split('\n'):
+                    if 'KEY FOUND!' in line:
+                        # Extract password between brackets
+                        if '[' in line and ']' in line:
+                            start = line.index('[') + 1
+                            end = line.index(']')
+                            password = line[start:end].strip()
+                            if password:
+                                logger.info(f"aircrack-ng found password in output: {password}")
+                                return (password, crack_time)
+            
+            logger.info(f"aircrack-ng did not find password for {ssid}")
+            return None
+        
+        except subprocess.TimeoutExpired:
+            logger.warning(f"aircrack-ng timeout for {handshake['ssid']}")
+            if 'process' in self.active_cracks.get(handshake_id, {}):
+                self.active_cracks[handshake_id]['process'].kill()
+            return None
+        except Exception as e:
+            logger.error(f"aircrack-ng error: {e}")
             return None
     
     def get_status(self) -> Dict:

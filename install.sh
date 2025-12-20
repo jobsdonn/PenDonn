@@ -586,10 +586,18 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
         echo "  Monitor:    $MON_IFACE (scans networks)"
         echo "  Attack:     $ATK_IFACE (captures handshakes)"
         
-        # Update config file
-        sed -i "s/\"management_interface\": \"wlan0\"/\"management_interface\": \"$MGMT_IFACE\"/g" "$CONFIG_FILE"
-        sed -i "s/\"monitor_interface\": \"wlan1\"/\"monitor_interface\": \"$MON_IFACE\"/g" "$CONFIG_FILE"
-        sed -i "s/\"attack_interface\": \"wlan2\"/\"attack_interface\": \"$ATK_IFACE\"/g" "$CONFIG_FILE"
+        # Update config file with Python (more reliable than sed)
+        $INSTALL_DIR/venv/bin/python3 -c "
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+config['wifi']['management_interface'] = '$MGMT_IFACE'
+config['wifi']['monitor_interface'] = '$MON_IFACE'
+config['wifi']['attack_interface'] = '$ATK_IFACE'
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+print('Config updated: WiFi interfaces configured')
+"
     else
         print_warning "Not enough interfaces for auto-configuration"
         echo "You'll need to edit config manually later"
@@ -617,7 +625,17 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     done
     
     if [ -n "$WHITELIST_SSIDS" ]; then
-        sed -i "s/\"ssids\": \[\]/\"ssids\": [$WHITELIST_SSIDS]/g" "$CONFIG_FILE"
+        # Update config with Python (proper JSON handling)
+        $INSTALL_DIR/venv/bin/python3 -c "
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+ssids = [$WHITELIST_SSIDS]
+config['whitelist']['ssids'] = ssids
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+print(f'Config updated: {len(ssids)} SSID(s) whitelisted')
+"
         echo -e "${GREEN}Whitelist configured${NC}"
     else
         echo -e "${YELLOW}No SSIDs whitelisted - will scan ALL networks${NC}"
@@ -629,11 +647,22 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     echo -e "${BLUE}[3/5] Web Interface Configuration${NC}"
     read -p "Enter web interface port [8080]: " WEB_PORT
     WEB_PORT=${WEB_PORT:-8080}
-    sed -i "s/\"port\": 8080/\"port\": $WEB_PORT/g" "$CONFIG_FILE"
     
     # Generate random secret key
     SECRET_KEY=$(openssl rand -hex 32)
-    sed -i "s/\"secret_key\": \"CHANGE_THIS_SECRET_KEY_IN_PRODUCTION\"/\"secret_key\": \"$SECRET_KEY\"/g" "$CONFIG_FILE"
+    
+    # Update config with Python
+    $INSTALL_DIR/venv/bin/python3 -c "
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+config['web']['port'] = $WEB_PORT
+config['web']['secret_key'] = '$SECRET_KEY'
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+print('Config updated: web.port = $WEB_PORT, secret_key generated')
+"
+    
     echo -e "${GREEN}Web interface configured on port $WEB_PORT${NC}"
     echo -e "${GREEN}Random secret key generated${NC}"
     
@@ -643,12 +672,26 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     echo -e "${BLUE}[4/5] Password Cracking Configuration${NC}"
     read -p "Enable auto-cracking after handshake capture? (yes/no) [yes]: " AUTO_CRACK
     AUTO_CRACK=${AUTO_CRACK:-yes}
+    
+    # Use Python to update JSON reliably
+    AUTO_CRACK_VALUE="true"
     if [ "$AUTO_CRACK" = "no" ]; then
-        sed -i "s/\"auto_start_cracking\": true/\"auto_start_cracking\": false/g" "$CONFIG_FILE"
+        AUTO_CRACK_VALUE="false"
         echo -e "${YELLOW}Auto-cracking disabled${NC}"
     else
         echo -e "${GREEN}Auto-cracking enabled${NC}"
     fi
+    
+    # Update config with Python (more reliable than sed for JSON)
+    $INSTALL_DIR/venv/bin/python3 -c "
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+config['cracking']['auto_start_cracking'] = $AUTO_CRACK_VALUE
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+print('Config updated: auto_start_cracking = $AUTO_CRACK_VALUE')
+"
     
     echo ""
     
@@ -656,17 +699,45 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     echo -e "${BLUE}[5/5] Display Configuration${NC}"
     read -p "Do you have a Waveshare display connected? (yes/no) [no]: " HAS_DISPLAY
     HAS_DISPLAY=${HAS_DISPLAY:-no}
-    if [ "$HAS_DISPLAY" = "no" ]; then
-        sed -i "s/\"enabled\": true/\"enabled\": false/g" "$CONFIG_FILE"
-        echo -e "${YELLOW}Display disabled (headless mode)${NC}"
-    else
+    
+    # Use Python to update JSON reliably
+    DISPLAY_ENABLED="false"
+    if [ "$HAS_DISPLAY" = "yes" ]; then
+        DISPLAY_ENABLED="true"
         echo -e "${GREEN}Display enabled${NC}"
+    else
+        echo -e "${YELLOW}Display disabled (headless mode)${NC}"
     fi
+    
+    # Update config with Python
+    $INSTALL_DIR/venv/bin/python3 -c "
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+config['display']['enabled'] = $DISPLAY_ENABLED
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+print('Config updated: display.enabled = $DISPLAY_ENABLED')
+"
     
     echo ""
     echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║          Configuration completed successfully!                ║${NC}"
     echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # Verify configuration was saved
+    print_status "Verifying configuration..."
+    if [ -f "$CONFIG_FILE" ]; then
+        CONFIG_SIZE=$(stat -f%z "$CONFIG_FILE" 2>/dev/null || stat -c%s "$CONFIG_FILE" 2>/dev/null)
+        if [ "$CONFIG_SIZE" -gt 100 ]; then
+            print_success "Configuration file saved successfully ($CONFIG_SIZE bytes)"
+        else
+            print_warning "Configuration file seems too small, may not have saved correctly"
+        fi
+    else
+        print_error "Configuration file not found at $CONFIG_FILE"
+    fi
     echo ""
     
     # Show configuration summary
@@ -687,6 +758,21 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     fi
     echo "  Auto-cracking: $AUTO_CRACK"
     echo "  Display: $HAS_DISPLAY"
+    echo ""
+    
+    # Show actual saved config values for verification
+    echo -e "${BLUE}Saved Configuration Values:${NC}"
+    $INSTALL_DIR/venv/bin/python3 -c "
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+print(f\"  auto_start_cracking: {config['cracking']['auto_start_cracking']}\")
+print(f\"  display.enabled: {config['display']['enabled']}\")
+print(f\"  web.port: {config['web']['port']}\")
+print(f\"  whitelist.ssids: {len(config['whitelist']['ssids'])} SSID(s)\")
+if 'wifi' in config and 'monitor_interface' in config['wifi']:
+    print(f\"  monitor_interface: {config['wifi']['monitor_interface']}\")
+"
     echo ""
     
 else
