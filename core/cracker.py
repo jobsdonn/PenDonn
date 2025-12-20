@@ -216,9 +216,8 @@ class PasswordCracker:
                         
                         logger.info(f"Password cracked for {handshake['ssid']}: {password}")
                         
-                        # Stop capturing handshakes for this network
-                        if self.wifi_scanner:
-                            self.wifi_scanner.stop_capture_for_network(handshake['bssid'])
+                        # Note: We don't forcibly stop active captures as it may kill shared processes
+                        # Instead, the wifi_scanner will naturally skip this network on next scan cycle
                         
                         break
                 

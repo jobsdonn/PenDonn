@@ -589,12 +589,6 @@ class WiFiScanner:
         if bssid in self.active_captures:
             self._finalize_capture(bssid, success=False)
     
-    def stop_capture_for_network(self, bssid: str):
-        """Stop capturing handshakes for a network (e.g., after password cracked)"""
-        if bssid in self.active_captures:
-            logger.info(f"Stopping handshake capture for {bssid} - password cracked")
-            self._stop_capture(bssid)
-    
     def get_statistics(self) -> Dict:
         """Get current statistics"""
         return {
