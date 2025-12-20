@@ -280,11 +280,8 @@ class WiFiScanner:
                     
                     # Start handshake capture if WPA/WPA2 and in whitelist (or whitelist empty)
                     if 'WPA' in enc_type and bssid not in self.active_captures:
-                        # Skip if password already cracked
-                        if self.db.get_password_for_network(bssid):
-                            logger.debug(f"Network {essid} already cracked - skipping")
                         # Only attack if no whitelist or network is in whitelist
-                        elif not self.whitelist_ssids or essid in self.whitelist_ssids:
+                        if not self.whitelist_ssids or essid in self.whitelist_ssids:
                             self._start_handshake_capture(bssid, essid, channel_num)
                         else:
                             logger.debug(f"Network {essid} discovered but not attacking - not in whitelist")
