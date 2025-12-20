@@ -156,10 +156,11 @@ class NetworkEnumerator:
             
             # Phase 1: Connect to network
             logger.info(f"Phase 1: Connecting to {ssid}...")
-            connection_success = self._connect_to_network(ssid, password)
+            connection_success, error_msg = self._connect_to_network(ssid, password)
             
             if not connection_success:
-                logger.error(f"Failed to connect to {ssid}")
+                logger.error(f"Failed to connect to {ssid}: {error_msg}")
+                results['phases']['connection'] = {'status': 'failed', 'error': error_msg}
                 self.db.update_scan(scan_id, 'failed', results, 0)
                 return
             
@@ -177,36 +178,57 @@ class NetworkEnumerator:
             logger.info(f"Phase 3: Port scanning {len(hosts)} hosts...")
             scan_results = []
             
-            for host in hosts:
-                host_scan = self._scan_host(host)
-                scan_results.append(host_scan)
-                
-                # Check for common vulnerabilities
-                vulns = self._check_vulnerabilities(scan_id, host, host_scan)
-                vulnerabilities_found += len(vulns)
+            try:
+                for i, host in enumerate(hosts, 1):
+                    logger.info(f"Scanning host {i}/{len(hosts)}: {host}")
+                    host_scan = self._scan_host(host)
+                    scan_results.append(host_scan)
+                    
+                    # Check for common vulnerabilities
+                    vulns = self._check_vulnerabilities(scan_id, host, host_scan)
+                    vulnerabilities_found += len(vulns)
+                    logger.info(f"Host {host}: Found {len(host_scan.get('ports', []))} open ports, {len(vulns)} vulnerabilities")
             
-            results['phases']['port_scan'] = {
-                'status': 'completed',
-                'hosts_scanned': len(scan_results),
-                'results': scan_results
-            }
+                results['phases']['port_scan'] = {
+                    'status': 'completed',
+                    'hosts_scanned': len(scan_results),
+                    'results': scan_results
+                }
+            except Exception as e:
+                logger.error(f"Port scan error: {e}", exc_info=True)
+                results['phases']['port_scan'] = {
+                    'status': 'failed',
+                    'error': str(e),
+                    'hosts_scanned': len(scan_results)
+                }
             
             # Phase 4: Run plugins
             logger.info(f"Phase 4: Running vulnerability plugins...")
-            plugin_results = self._run_plugins(scan_id, hosts, scan_results)
-            results['phases']['plugins'] = plugin_results
-            vulnerabilities_found += plugin_results.get('vulnerabilities_found', 0)
+            try:
+                plugin_results = self._run_plugins(scan_id, hosts, scan_results)
+                results['phases']['plugins'] = plugin_results
+                vulnerabilities_found += plugin_results.get('vulnerabilities_found', 0)
+                logger.info(f"Plugins found {plugin_results.get('vulnerabilities_found', 0)} additional vulnerabilities")
+            except Exception as e:
+                logger.error(f"Plugin execution error: {e}", exc_info=True)
+                results['phases']['plugins'] = {
+                    'status': 'failed',
+                    'error': str(e)
+                }
             
             # Update scan with results
             self.db.update_scan(scan_id, 'completed', results, vulnerabilities_found)
-            logger.info(f"Enumeration completed for {ssid}. Found {vulnerabilities_found} vulnerabilities.")
+            logger.info(f"✓ Enumeration completed for {ssid}. Found {vulnerabilities_found} vulnerabilities, {len(hosts)} hosts")
             
             # Disconnect from network
             self._disconnect_from_network()
         
         except Exception as e:
-            logger.error(f"Enumeration error for scan {scan_id}: {e}")
-            self.db.update_scan(scan_id, 'failed', {'error': str(e)}, 0)
+            logger.error(f"Enumeration error for scan {scan_id}: {e}", exc_info=True)
+            error_results = results.copy()
+            error_results['error'] = str(e)
+            error_results['error_type'] = type(e).__name__
+            self.db.update_scan(scan_id, 'failed', error_results, 0)
         
         finally:
             if scan_id in self.active_scans:
@@ -273,8 +295,15 @@ network={{
             interface = self.config['wifi']['management_interface']
             subprocess.run(['killall', 'wpa_supplicant'], 
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['dhclient', '-r', interface], 
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # Try dhcpcd first, then dhclient
+            if subprocess.run(['which', 'dhcpcd'], capture_output=True).returncode == 0:
+                subprocess.run(['dhcpcd', '-k', interface], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif subprocess.run(['which', 'dhclient'], capture_output=True).returncode == 0:
+                subprocess.run(['dhclient', '-r', interface], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
             logger.info("Disconnected from network")
         except Exception as e:
             logger.error(f"Disconnection error: {e}")
@@ -291,6 +320,7 @@ network={{
             import re
             ip_match = re.search(r'inet (\d+\.\d+\.\d+\.\d+/\d+)', result.stdout)
             if not ip_match:
+                logger.error(f"Could not determine network range from {interface}")
                 return []
             
             network = ip_match.group(1)
@@ -303,12 +333,16 @@ network={{
             for host in self.nm.all_hosts():
                 if self.nm[host].state() == 'up':
                     hosts.append(host)
+                    hostname = ''
+                    if 'hostnames' in self.nm[host] and self.nm[host]['hostnames']:
+                        hostname = self.nm[host]['hostnames'][0].get('name', '')
+                    logger.info(f"  ↳ {host} {hostname if hostname else '(no hostname)'}")
             
-            logger.info(f"Discovered {len(hosts)} hosts")
+            logger.info(f"✓ Discovered {len(hosts)} active hosts")
             return hosts
         
         except Exception as e:
-            logger.error(f"Host discovery error: {e}")
+            logger.error(f"Host discovery error: {e}", exc_info=True)
             return []
     
     def _scan_host(self, host: str) -> Dict:

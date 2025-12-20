@@ -759,21 +759,159 @@
                 const data = await response.json();
                 
                 if (data.success && data.scans.length > 0) {
-                    let html = '<table><thead><tr><th>SSID</th><th>Scan Type</th><th>Status</th><th>Vulnerabilities</th><th>Started</th></tr></thead><tbody>';
+                    let html = '<table><thead><tr><th></th><th>SSID</th><th>Scan Type</th><th>Status</th><th>Progress</th><th>Vulnerabilities</th><th>Started</th></tr></thead><tbody>';
                     
-                    data.scans.forEach(scan => {
+                    data.scans.forEach((scan, idx) => {
                         let statusBadge = '';
-                        if (scan.status === 'completed') statusBadge = '<span class="badge badge-success">Completed</span>';
-                        else if (scan.status === 'running') statusBadge = '<span class="badge badge-warning">Running</span>';
-                        else statusBadge = '<span class="badge badge-danger">Failed</span>';
+                        let progressInfo = '';
                         
-                        html += `<tr>
+                        if (scan.status === 'completed') {
+                            statusBadge = '<span class="badge badge-success">✓ Completed</span>';
+                        } else if (scan.status === 'running') {
+                            statusBadge = '<span class="badge badge-warning">⚡ Running</span>';
+                        } else {
+                            statusBadge = '<span class="badge badge-danger">✗ Failed</span>';
+                        }
+                        
+                        // Parse results to show progress
+                        let results = {};
+                        try {
+                            results = typeof scan.results === 'string' ? JSON.parse(scan.results) : scan.results;
+                        } catch (e) {
+                            results = scan.results || {};
+                        }
+                        
+                        // Build progress summary
+                        if (results.phases) {
+                            let phases = [];
+                            if (results.phases.connection?.status === 'success') phases.push('✓ Connected');
+                            else if (results.phases.connection?.status === 'failed') phases.push('✗ Connection failed');
+                            
+                            if (results.phases.discovery) {
+                                if (results.phases.discovery.status === 'completed') {
+                                    phases.push(`✓ ${results.phases.discovery.hosts_found || 0} hosts`);
+                                } else if (results.phases.discovery.status === 'failed') {
+                                    phases.push('✗ Discovery failed');
+                                }
+                            }
+                            
+                            if (results.phases.port_scan) {
+                                if (results.phases.port_scan.status === 'completed') {
+                                    phases.push(`✓ Scanned ${results.phases.port_scan.hosts_scanned || 0} hosts`);
+                                } else if (results.phases.port_scan.status === 'failed') {
+                                    phases.push('✗ Scan failed');
+                                }
+                            }
+                            
+                            if (results.phases.plugins) {
+                                if (results.phases.plugins.status === 'completed') {
+                                    phases.push('✓ Plugins completed');
+                                } else if (results.phases.plugins.status === 'failed') {
+                                    phases.push('✗ Plugins failed');
+                                }
+                            }
+                            
+                            progressInfo = phases.join(' → ') || 'No data';
+                        } else if (results.error) {
+                            progressInfo = `<span class="text-danger">Error: ${results.error}</span>`;
+                        }
+                        
+                        const expandId = `scan-details-${idx}`;
+                        html += `<tr onclick="toggleScanDetails('${expandId}')" style="cursor: pointer;">
+                            <td><span id="${expandId}-icon">▶</span></td>
                             <td><strong>${scan.ssid}</strong></td>
                             <td>${scan.scan_type}</td>
                             <td>${statusBadge}</td>
+                            <td style="font-size: 0.85em;">${progressInfo}</td>
                             <td><span class="badge badge-danger">${scan.vulnerabilities_found}</span></td>
                             <td>${new Date(scan.start_time).toLocaleString()}</td>
                         </tr>`;
+                        
+                        // Expandable details row
+                        html += `<tr id="${expandId}" class="scan-details-row" style="display: none;">
+                            <td colspan="7">
+                                <div style="padding: 15px; background: #f8f9fa; border-left: 3px solid #007bff;">`;
+                        
+                        // Show detailed phase information
+                        if (results.phases) {
+                            html += '<h4 style="margin-top: 0;">Enumeration Phases:</h4>';
+                            
+                            // Connection phase
+                            if (results.phases.connection) {
+                                const conn = results.phases.connection;
+                                html += `<div style="margin-bottom: 10px;"><strong>Phase 1: Connection</strong> - `;
+                                if (conn.status === 'success') {
+                                    html += '<span class="badge badge-success">Success</span>';
+                                } else {
+                                    html += `<span class="badge badge-danger">Failed</span>`;
+                                    if (conn.error) html += `<br><span class="text-danger">Error: ${conn.error}</span>`;
+                                }
+                                html += '</div>';
+                            }
+                            
+                            // Discovery phase
+                            if (results.phases.discovery) {
+                                const disc = results.phases.discovery;
+                                html += `<div style="margin-bottom: 10px;"><strong>Phase 2: Host Discovery</strong> - `;
+                                if (disc.status === 'completed') {
+                                    html += `<span class="badge badge-success">Found ${disc.hosts_found || 0} hosts</span>`;
+                                } else {
+                                    html += `<span class="badge badge-danger">Failed</span>`;
+                                    if (disc.error) html += `<br><span class="text-danger">Error: ${disc.error}</span>`;
+                                }
+                                html += '</div>';
+                            }
+                            
+                            // Port scan phase
+                            if (results.phases.port_scan) {
+                                const ports = results.phases.port_scan;
+                                html += `<div style="margin-bottom: 10px;"><strong>Phase 3: Port Scanning</strong> - `;
+                                if (ports.status === 'completed') {
+                                    html += `<span class="badge badge-success">Scanned ${ports.hosts_scanned || 0} hosts</span>`;
+                                    
+                                    // Show host details if available
+                                    if (ports.results && ports.results.length > 0) {
+                                        html += '<div style="margin-top: 10px; margin-left: 20px;">';
+                                        ports.results.forEach(host => {
+                                            html += `<div style="margin-bottom: 8px;">
+                                                <strong>${host.ip}</strong> ${host.hostname ? `(${host.hostname})` : ''}
+                                                ${host.os ? `<br>OS: ${host.os}` : ''}`;
+                                            if (host.ports && host.ports.length > 0) {
+                                                html += '<br>Open ports: ';
+                                                html += host.ports.map(p => `${p.port}/${p.service || 'unknown'}`).join(', ');
+                                            }
+                                            html += '</div>';
+                                        });
+                                        html += '</div>';
+                                    }
+                                } else {
+                                    html += `<span class="badge badge-danger">Failed</span>`;
+                                    if (ports.error) html += `<br><span class="text-danger">Error: ${ports.error}</span>`;
+                                }
+                                html += '</div>';
+                            }
+                            
+                            // Plugins phase
+                            if (results.phases.plugins) {
+                                const plugins = results.phases.plugins;
+                                html += `<div style="margin-bottom: 10px;"><strong>Phase 4: Vulnerability Plugins</strong> - `;
+                                if (plugins.status === 'completed') {
+                                    html += `<span class="badge badge-success">Found ${plugins.vulnerabilities_found || 0} vulnerabilities</span>`;
+                                } else {
+                                    html += `<span class="badge badge-danger">Failed</span>`;
+                                    if (plugins.error) html += `<br><span class="text-danger">Error: ${plugins.error}</span>`;
+                                }
+                                html += '</div>';
+                            }
+                        } else if (results.error) {
+                            html += `<h4 style="margin-top: 0; color: #dc3545;">Error</h4>`;
+                            html += `<p><strong>Error Type:</strong> ${results.error_type || 'Unknown'}</p>`;
+                            html += `<p><strong>Message:</strong> ${results.error}</p>`;
+                        } else {
+                            html += '<p>No detailed information available</p>';
+                        }
+                        
+                        html += `</div></td></tr>`;
                     });
                     
                     html += '</tbody></table>';
@@ -784,6 +922,18 @@
             } catch (error) {
                 content.innerHTML = '<div class="empty-state">Error loading scans</div>';
                 console.error('Error:', error);
+            }
+        }
+        
+        function toggleScanDetails(id) {
+            const detailsRow = document.getElementById(id);
+            const icon = document.getElementById(id + '-icon');
+            if (detailsRow.style.display === 'none') {
+                detailsRow.style.display = 'table-row';
+                icon.textContent = '▼';
+            } else {
+                detailsRow.style.display = 'none';
+                icon.textContent = '▶';
             }
         }
 

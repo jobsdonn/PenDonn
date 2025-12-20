@@ -263,15 +263,15 @@ class PasswordCracker:
             logger.info(f"Cracking with John the Ripper: {handshake['ssid']}")
             
             # John can't read hashcat 22000 format directly
-            # Use hcx2john to convert cap to john format
+            # Use wpapcap2john (part of john) to convert cap to john format
             john_hash_file = capture_file.replace('.cap', '.john')
             
-            # Convert using hcx2john
+            # Convert using wpapcap2john (comes with john)
             if not os.path.exists(john_hash_file):
                 try:
-                    # Use hcx2john to create John-compatible hash
+                    # Try wpapcap2john first (standard with john)
                     result = subprocess.run(
-                        ['hcx2john', capture_file],
+                        ['wpapcap2john', capture_file],
                         capture_output=True,
                         text=True,
                         timeout=30
@@ -281,13 +281,14 @@ class PasswordCracker:
                         # Save John hash to file
                         with open(john_hash_file, 'w') as f:
                             f.write(result.stdout)
-                        logger.info(f"Successfully converted to John format: {john_hash_file}")
+                        logger.info(f"Successfully converted to John format using wpapcap2john: {john_hash_file}")
                     else:
-                        logger.warning(f"hcx2john failed for {handshake_id}")
+                        logger.warning(f"wpapcap2john failed for {handshake_id}, trying aircrack-ng")
+                        # Fallback: use aircrack-ng to extract EAPOL
                         return None
                             
                 except FileNotFoundError:
-                    logger.error("hcx2john not found. Install with: sudo apt install hcxtools")
+                    logger.error("wpapcap2john not found. Install john with: sudo apt install john")
                     return None
             
             if not os.path.exists(john_hash_file) or os.path.getsize(john_hash_file) == 0:
@@ -462,7 +463,9 @@ class PasswordCracker:
                 hash_file,
                 self.wordlist,
                 '-o', output_file,
-                '--force'  # Force if no GPU, removed --quiet to see errors
+                '--force',  # Force if no GPU
+                '-D', '1',  # Device type: 1=CPU (don't use GPU on Raspberry Pi)
+                '--opencl-device-types', '1'  # CPU only
             ]
             
             logger.info(f"Running Hashcat command: {' '.join(cmd)}")
