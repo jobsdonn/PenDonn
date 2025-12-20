@@ -69,6 +69,8 @@ class NetworkEnumerator:
     
     def _scan_monitor(self):
         """Monitor for networks ready to scan"""
+        scanned_networks = set()  # Track networks we've already started scanning
+        
         while self.running:
             try:
                 if self.auto_scan:
@@ -76,14 +78,23 @@ class NetworkEnumerator:
                     cracked = self.db.get_cracked_passwords()
                     
                     for entry in cracked:
-                        # Check if already scanned
+                        bssid = entry['bssid']
+                        
+                        # Skip if we already started a scan for this network
+                        if bssid in scanned_networks:
+                            continue
+                        
+                        # Check if already scanned in database
                         existing_scans = self.db.get_scans(network_id=None)
                         already_scanned = any(
-                            s['ssid'] == entry['ssid'] and s['status'] == 'completed'
+                            s['ssid'] == entry['ssid'] and s['status'] in ('completed', 'running')
                             for s in existing_scans
                         )
                         
                         if not already_scanned:
+                            # Mark as started to prevent duplicates
+                            scanned_networks.add(bssid)
+                            
                             # Start enumeration
                             self.enumerate_network(
                                 entry['ssid'],
