@@ -453,11 +453,24 @@ class WiFiScanner:
                 # Log the error with more detail
                 error_msg = result.stderr.strip() if result.stderr else ""
                 stdout_msg = result.stdout.strip() if result.stdout else ""
+                full_output = error_msg + " " + stdout_msg
                 
-                if "Operation not permitted" in error_msg:
+                # Check for critical failures that mean we should stop this capture
+                if "No such BSSID available" in full_output:
+                    logger.debug(f"Network {ssid} not visible for deauth (out of range or offline)")
+                    # Stop this capture immediately - network is gone
+                    capture_info['deauth_failed'] = True
+                    return
+                elif "ioctl(SIOCSIWMODE) failed" in full_output:
+                    logger.debug(f"Interface busy for {ssid}, will retry")
+                    capture_info['deauth_failed'] = True
+                    return
+                elif "Operation not permitted" in full_output:
                     logger.debug(f"Deauth temporarily unavailable for {ssid} (interface busy)")
+                    # Don't mark as failed - might work on follow-up
+                # Actual problems - warn
                 elif error_msg or stdout_msg:
-                    logger.warning(f"Deauth failed for {ssid}: stderr={error_msg[:200]}, stdout={stdout_msg[:200]}, returncode={result.returncode}")
+                    logger.warning(f"Deauth failed for {ssid}: {full_output[:300]}, returncode={result.returncode}")
                 else:
                     logger.warning(f"Deauth failed for {ssid}: No output, returncode={result.returncode}")
                     
@@ -511,6 +524,14 @@ class WiFiScanner:
                             # Only log every 30 seconds to avoid spam
                             if int(time_since_deauth) % 30 < 5:
                                 logger.info(f"🔍 Checking {ssid} handshake ({int(elapsed)}s)")
+                    elif capture_info.get('deauth_failed', False):
+                        # Deauth failed critically (network offline/out of range) - stop immediately
+                        logger.info(f"Stopping capture for {ssid} - deauth failed (network unavailable)")
+                        self._finalize_capture(bssid, success=False)
+                    elif elapsed > 30:
+                        # Waiting too long for deauth to be sent
+                        logger.warning(f"No deauth sent for {ssid} after {int(elapsed)}s, stopping")
+                        self._finalize_capture(bssid, success=False)
             
             except Exception as e:
                 logger.error(f"Capture monitor error: {e}")
