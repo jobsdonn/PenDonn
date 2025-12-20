@@ -31,6 +31,11 @@ class PasswordCracker:
         
         self.john_format = config['cracking']['john_format']
         self.hashcat_mode = config['cracking']['hashcat_mode']
+        self.hashcat_rules_dir = config['cracking'].get('hashcat_rules_dir', './rules')
+        self.hashcat_use_rules = config['cracking'].get('use_rules', True)
+        self.hashcat_brute_force = config['cracking'].get('brute_force', True)
+        self.hashcat_brute_max_length = config['cracking'].get('brute_max_length', 8)
+        self.session_prefix = config['cracking'].get('session_prefix', 'pendonn')
         
         self.running = False
         self.crack_queue = queue.Queue()
@@ -74,6 +79,49 @@ class PasswordCracker:
         
         self.active_cracks.clear()
         logger.info("Password cracking service stopped")
+    
+    def _parse_hashcat_potfile(self, potfile_path: str = None) -> Dict[str, str]:
+        """Parse hashcat potfile into hash:password lookup table for O(1) access
+        
+        Args:
+            potfile_path: Path to hashcat.potfile, defaults to hashcat default location
+            
+        Returns:
+            Dictionary with hash as key and password as value
+        """
+        if not potfile_path:
+            # Try common hashcat potfile locations
+            possible_paths = [
+                os.path.expanduser('~/.hashcat/hashcat.potfile'),
+                os.path.expanduser('~/.local/share/hashcat/hashcat.potfile'),
+                './hashcat.potfile'
+            ]
+            for path in possible_paths:
+                if os.path.exists(path):
+                    potfile_path = path
+                    break
+        
+        hash_lookup = {}
+        
+        if not potfile_path or not os.path.exists(potfile_path):
+            logger.debug("No hashcat potfile found")
+            return hash_lookup
+        
+        try:
+            with open(potfile_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if ':' in line:
+                        # Format: hash:password
+                        parts = line.split(':', 1)
+                        if len(parts) == 2:
+                            hash_lookup[parts[0]] = parts[1]
+            
+            logger.info(f"Loaded {len(hash_lookup)} cracked hashes from potfile")
+        except Exception as e:
+            logger.error(f"Error parsing potfile: {e}")
+        
+        return hash_lookup
     
     def _queue_monitor(self):
         """Monitor database for new handshakes to crack"""
@@ -308,10 +356,18 @@ class PasswordCracker:
             return None
     
     def _crack_with_hashcat(self, handshake: Dict) -> Optional[tuple]:
-        """Crack password using Hashcat"""
+        """Crack password using Hashcat with multiple attack strategies
+        
+        Implements:
+        1. Dictionary attack with wordlist
+        2. Rule-based attacks (if enabled)
+        3. Incremental brute force (if enabled)
+        4. Session management for resume capability
+        """
         try:
             handshake_id = handshake['id']
             capture_file = handshake['file_path']
+            ssid = handshake['ssid']
             
             # Wait a bit and verify file exists and has content
             for i in range(10):  # Try for up to 10 seconds
@@ -328,7 +384,7 @@ class PasswordCracker:
                 logger.error(f"Capture file too small: {capture_file} ({os.path.getsize(capture_file)} bytes)")
                 return None
             
-            logger.info(f"Cracking with Hashcat: {handshake['ssid']}")
+            logger.info(f"Cracking with Hashcat: {ssid}\")")
             
             # Convert to hashcat 22000 format
             hash_file = capture_file.replace('.cap', '.22000')

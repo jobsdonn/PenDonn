@@ -26,14 +26,29 @@ class MockWiFiMonitor:
         self.running = False
         self.current_channel = 1
         
-        # Mock network data
+        # Mock network data - realistic WiFi networks with varied characteristics
         self.mock_networks = [
-            {"ssid": "HomeNetwork", "bssid": "AA:BB:CC:DD:EE:01", "channel": 6, "encryption": "WPA2", "signal": -45},
-            {"ssid": "CoffeeShop_WiFi", "bssid": "AA:BB:CC:DD:EE:02", "channel": 1, "encryption": "WPA2", "signal": -60},
-            {"ssid": "Office_Guest", "bssid": "AA:BB:CC:DD:EE:03", "channel": 11, "encryption": "WPA2", "signal": -70},
-            {"ssid": "Neighbor_2.4G", "bssid": "AA:BB:CC:DD:EE:04", "channel": 3, "encryption": "WPA2", "signal": -75},
-            {"ssid": "TestNetwork", "bssid": "AA:BB:CC:DD:EE:05", "channel": 9, "encryption": "WPA2", "signal": -55},
-            {"ssid": "", "bssid": "AA:BB:CC:DD:EE:06", "channel": 6, "encryption": "WPA2", "signal": -80},  # Hidden
+            # Home networks (common SSID patterns)
+            {"ssid": "NETGEAR42", "bssid": "AA:BB:CC:DD:EE:01", "channel": 6, "encryption": "WPA2", "signal": -45},
+            {"ssid": "TP-Link_5F3A", "bssid": "AA:BB:CC:DD:EE:02", "channel": 1, "encryption": "WPA2", "signal": -60},
+            {"ssid": "Linksys00234", "bssid": "AA:BB:CC:DD:EE:03", "channel": 11, "encryption": "WPA2", "signal": -70},
+            {"ssid": "ASUS_Guest", "bssid": "AA:BB:CC:DD:EE:04", "channel": 3, "encryption": "WPA2", "signal": -75},
+            {"ssid": "MyHome2024", "bssid": "AA:BB:CC:DD:EE:05", "channel": 9, "encryption": "WPA2", "signal": -55},
+            
+            # Coffee shop / public
+            {"ssid": "Starbucks WiFi", "bssid": "AA:BB:CC:DD:EE:06", "channel": 6, "encryption": "WPA2", "signal": -50},
+            {"ssid": "CoffeeShop_Guest", "bssid": "AA:BB:CC:DD:EE:07", "channel": 11, "encryption": "WPA2", "signal": -65},
+            
+            # Office networks
+            {"ssid": "Office_Corp", "bssid": "AA:BB:CC:DD:EE:08", "channel": 1, "encryption": "WPA2", "signal": -70},
+            {"ssid": "CompanyGuest", "bssid": "AA:BB:CC:DD:EE:09", "channel": 6, "encryption": "WPA2", "signal": -68},
+            
+            # Weak security / easy targets
+            {"ssid": "SmartHome", "bssid": "AA:BB:CC:DD:EE:10", "channel": 4, "encryption": "WPA2", "signal": -52},
+            {"ssid": "WiFi-2.4G", "bssid": "AA:BB:CC:DD:EE:11", "channel": 7, "encryption": "WPA2", "signal": -58},
+            
+            # Hidden network
+            {"ssid": "", "bssid": "AA:BB:CC:DD:EE:12", "channel": 6, "encryption": "WPA2", "signal": -80},
         ]
         
         self.networks = {}
@@ -65,23 +80,18 @@ class MockWiFiMonitor:
         logger.info("Mock WiFi monitor stopped")
     
     def _mock_discovery(self):
-        """Simulate network discovery"""
-        logger.info("Mock network discovery started")
+        """Simulate network discovery with realistic timing"""
+        logger.info("Mock network discovery started (simulating gradual detection)")
         
-        # Discover networks gradually
+        # Discover networks gradually (more realistic)
         for network in self.mock_networks:
             if not self.running:
                 break
             
-            time.sleep(random.uniform(2, 5))  # Random discovery intervals
+            time.sleep(random.uniform(1, 3))  # Faster discovery - networks appear quickly
             
             ssid = network['ssid']
             bssid = network['bssid']
-            
-            # Skip whitelisted networks
-            if ssid in self.whitelist_ssids:
-                logger.debug(f"Skipping whitelisted network: {ssid}")
-                continue
             
             # Simulate signal variations
             signal_strength = network['signal'] + random.randint(-5, 5)
@@ -106,13 +116,18 @@ class MockWiFiMonitor:
                 signal_strength=signal_strength
             )
             
+            # Set whitelist flag (True if in whitelist, False otherwise)
+            if self.whitelist_ssids:
+                is_whitelisted = ssid in self.whitelist_ssids
+                self.db.set_whitelist(bssid, is_whitelisted)
+            
             logger.info(f"Mock: Discovered network - SSID: {self.networks[bssid]['ssid']}, "
                        f"BSSID: {bssid}, Channel: {network['channel']}, "
                        f"Signal: {signal_strength} dBm")
         
-        # Continue updating signal strengths
+        # Continue updating signal strengths (realistic signal fluctuation)
         while self.running:
-            time.sleep(10)
+            time.sleep(5)  # Update every 5s (matching improved scan timing)
             for bssid, network in self.networks.items():
                 # Simulate signal strength changes
                 network['signal_strength'] += random.randint(-3, 3)
@@ -120,46 +135,87 @@ class MockWiFiMonitor:
                 network['last_seen'] = datetime.now().isoformat()
     
     def _mock_handshake_capture(self):
-        """Simulate handshake capture"""
-        logger.info("Mock handshake capture started")
+        """Simulate handshake capture with improved timing (matching real improvements)"""
+        logger.info("Mock handshake capture started (simulating improved 5s checks + double deauth)")
         
-        time.sleep(10)  # Wait for some networks to be discovered
+        time.sleep(5)  # Wait for initial networks to be discovered (was 10s)
         
         captured = set()
         
         while self.running:
-            time.sleep(random.uniform(15, 30))  # Random handshake captures
+            # Simulate improved timing: check every 5-10 seconds instead of 15-30
+            time.sleep(random.uniform(5, 10))
             
             available_networks = [bssid for bssid in self.networks.keys() if bssid not in captured]
             
             if not available_networks:
                 continue
             
-            # Randomly capture a handshake
+            # Randomly select a network to capture
             bssid = random.choice(available_networks)
             network = self.networks[bssid]
             
-            # Simulate handshake capture (60% success rate)
-            if random.random() < 0.6:
+            # Only attack if no whitelist or network is in whitelist
+            if self.whitelist_ssids and network['ssid'] not in self.whitelist_ssids:
+                logger.debug(f"Mock: Skipping {network['ssid']} - not in whitelist")
+                captured.add(bssid)  # Mark as processed to avoid checking again
+                continue
+            
+            # Improved success rate (80% with double deauth) - was 60%
+            if random.random() < 0.8:
                 handshake_file = os.path.join(self.handshake_dir, f"{bssid.replace(':', '-')}.cap")
                 
-                # Create mock handshake file
+                # Create realistic mock handshake file with proper structure
+                # This simulates a real pcap file with WPA2 handshake
+                handshake_data = self._create_mock_pcap(bssid, network['ssid'])
+                
                 with open(handshake_file, 'wb') as f:
-                    f.write(b'MOCK_HANDSHAKE_DATA_' + bssid.encode())
+                    f.write(handshake_data)
+                
+                # Get network ID from database
+                network_entry = self.db.get_network_by_bssid(bssid)
+                if not network_entry:
+                    logger.error(f"Mock: Network not found in database for BSSID: {bssid}")
+                    continue
                 
                 # Add to database
                 self.db.add_handshake(
-                    network_id=self.db.get_network_id(bssid),
+                    network_id=network_entry['id'],
                     ssid=network['ssid'],
                     bssid=bssid,
-                    handshake_file=handshake_file
+                    file_path=handshake_file
                 )
                 
                 captured.add(bssid)
                 
-                logger.info(f"Mock: Captured handshake - SSID: {network['ssid']}, BSSID: {bssid}")
+                logger.info(f"Mock: ✓ Captured handshake - SSID: {network['ssid']}, BSSID: {bssid} "
+                           f"(improved timing + double deauth)")
             else:
-                logger.debug(f"Mock: Handshake capture failed for {network['ssid']}")
+                logger.debug(f"Mock: ✗ Handshake capture failed for {network['ssid']} (will retry)")
+    
+    def _create_mock_pcap(self, bssid: str, ssid: str) -> bytes:
+        """Create a realistic mock pcap file with WPA2 handshake data"""
+        # Simplified pcap header + frame data
+        # This creates a file that's large enough to pass size checks (>1KB)
+        pcap_header = b'\xd4\xc3\xb2\xa1\x02\x00\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\x00\x00\x01\x00\x00\x00'
+        
+        # Mock packet data - simulate EAPOL frames (WPA handshake)
+        mock_packet = b'\x00' * 256  # Packet placeholder
+        mock_eapol = b'\x88\x8e' + b'\x00' * 128  # EAPOL type + data
+        
+        # Build realistic-sized capture file
+        capture_data = pcap_header
+        for i in range(4):  # 4-way handshake
+            capture_data += mock_packet + mock_eapol
+        
+        # Add network identifiers
+        capture_data += f"SSID:{ssid}|BSSID:{bssid}".encode()
+        
+        # Pad to ensure >1KB (cracker checks file size)
+        while len(capture_data) < 1536:
+            capture_data += b'\x00'
+        
+        return capture_data
     
     def get_statistics(self) -> Dict:
         """Get mock statistics"""

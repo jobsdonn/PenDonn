@@ -26,15 +26,28 @@ class WiFiMonitor:
         
         # Auto-detect correct interfaces based on MAC addresses
         self.management_mac = "dc:a6:32:9e:ea:ba"  # Onboard WiFi MAC
+        self.single_interface_mode = config['wifi'].get('single_interface_mode', False)
+        self.allow_management_wifi = config['wifi'].get('allow_management_wifi', False)
+        
         detected_interfaces = self._detect_wifi_interfaces()
         
-        if len(detected_interfaces) < 2:
+        # Single interface mode (RPi Zero 2 W with only onboard WiFi)
+        if self.single_interface_mode:
+            logger.warning("⚠️  SINGLE INTERFACE MODE ENABLED")
+            logger.warning("⚠️  Using onboard WiFi for monitor mode - YOU WILL LOSE SSH CONNECTION!")
+            logger.warning("⚠️  Ensure you have local access (HDMI + keyboard) or auto-start on boot")
+            self.monitor_interface = config['wifi']['management_interface']
+            self.attack_interface = config['wifi']['management_interface']
+        elif len(detected_interfaces) < 2:
             logger.error(f"Not enough WiFi adapters! Found {len(detected_interfaces)}, need at least 2 external adapters")
-            logger.error("Please plug in external WiFi adapters")
-        
-        # Use detected interfaces, fallback to config if detection fails
-        self.monitor_interface = detected_interfaces[0] if len(detected_interfaces) >= 1 else config['wifi']['monitor_interface']
-        self.attack_interface = detected_interfaces[1] if len(detected_interfaces) >= 2 else config['wifi']['attack_interface']
+            logger.error("Please plug in external WiFi adapters OR enable single_interface_mode in config")
+            # Use detected interfaces, fallback to config if detection fails
+            self.monitor_interface = detected_interfaces[0] if len(detected_interfaces) >= 1 else config['wifi']['monitor_interface']
+            self.attack_interface = detected_interfaces[1] if len(detected_interfaces) >= 2 else config['wifi']['attack_interface']
+        else:
+            # Use detected interfaces, fallback to config if detection fails
+            self.monitor_interface = detected_interfaces[0] if len(detected_interfaces) >= 1 else config['wifi']['monitor_interface']
+            self.attack_interface = detected_interfaces[1] if len(detected_interfaces) >= 2 else config['wifi']['attack_interface']
         
         logger.info(f"Using interfaces: monitor={self.monitor_interface}, attack={self.attack_interface}")
         
@@ -163,17 +176,23 @@ class WiFiMonitor:
             result = subprocess.run(['ip', 'link', 'show', self.monitor_interface],
                                   capture_output=True, text=True, check=True)
             if onboard_mac.lower() in result.stdout.lower():
-                logger.error(f"CRITICAL: {self.monitor_interface} is your management WiFi!")
-                logger.error("Cannot put management WiFi in monitor mode - you'll lose SSH!")
-                return False
+                if not self.allow_management_wifi and not self.single_interface_mode:
+                    logger.error(f"CRITICAL: {self.monitor_interface} is your management WiFi!")
+                    logger.error("Cannot put management WiFi in monitor mode - you'll lose SSH!")
+                    return False
+                else:
+                    logger.warning(f"⚠️  {self.monitor_interface} is management WiFi - proceeding in single interface mode")
             
             # Check if attack interface is the onboard WiFi
             result = subprocess.run(['ip', 'link', 'show', self.attack_interface],
                                   capture_output=True, text=True, check=True)
             if onboard_mac.lower() in result.stdout.lower():
-                logger.error(f"CRITICAL: {self.attack_interface} is your management WiFi!")
-                logger.error("Cannot put management WiFi in monitor mode - you'll lose SSH!")
-                return False
+                if not self.allow_management_wifi and not self.single_interface_mode:
+                    logger.error(f"CRITICAL: {self.attack_interface} is your management WiFi!")
+                    logger.error("Cannot put management WiFi in monitor mode - you'll lose SSH!")
+                    return False
+                else:
+                    logger.warning(f"⚠️  {self.attack_interface} is management WiFi - proceeding in single interface mode")
             
             logger.info(f"Interfaces validated: {self.monitor_interface}, {self.attack_interface}")
             return True
@@ -296,12 +315,6 @@ class WiFiMonitor:
             if not ssid:
                 return
             
-            # WHITELIST LOGIC: Only attack networks IN the whitelist
-            # If whitelist is not empty and this SSID is NOT in the whitelist, skip it
-            if self.whitelist_ssids and ssid not in self.whitelist_ssids:
-                logger.debug(f"Skipping {ssid} - not in whitelist")
-                return
-            
             # Extract channel
             channel = self.current_channel
             if pkt.haslayer(Dot11Elt):
@@ -369,9 +382,14 @@ class WiFiMonitor:
                     self.db.set_whitelist(bssid, True)
             
             # Start handshake capture if WPA/WPA2 and not already capturing
+            # WHITELIST LOGIC: Only attack networks IN the whitelist
             if 'WPA' in encryption and bssid not in self.active_captures:
-                logger.info(f"→ Starting handshake capture for {ssid}")
-                self._start_handshake_capture(bssid, ssid, channel)
+                # Check if network should be attacked (whitelist check)
+                if self.whitelist_ssids and ssid not in self.whitelist_ssids:
+                    logger.debug(f"Network {ssid} discovered but not attacking - not in whitelist")
+                else:
+                    logger.info(f"→ Starting handshake capture for {ssid}")
+                    self._start_handshake_capture(bssid, ssid, channel)
             elif 'WPA' not in encryption and bssid not in self.active_captures:
                 # Only skip networks that are NOT already being captured
                 # Only log skip message for new networks or once every 5 minutes

@@ -31,17 +31,26 @@ class MockPasswordCracker:
         self.crack_queue = Queue()
         self.workers = []
         
-        # Mock passwords that will "crack"
-        self.mock_passwords = [
-            "password123",
-            "admin123",
-            "welcome1",
-            "qwerty123",
-            "letmein",
-            "password",
-            "123456789",
-            "admin"
-        ]
+        # Mock passwords - realistic common passwords from rockyou.txt style wordlists
+        # These represent real-world weak passwords that would be crackable
+        self.mock_passwords = {
+            # By SSID pattern - makes testing predictable and realistic
+            "NETGEAR42": "password123",
+            "TP-Link_5F3A": "admin123",
+            "Linksys00234": "welcome1",
+            "ASUS_Guest": "guest2024",
+            "MyHome2024": "mypassword",
+            "Starbucks WiFi": "starbucks",
+            "CoffeeShop_Guest": "coffee123",
+            "Office_Corp": "Company2024",
+            "CompanyGuest": "guest123",
+            "SmartHome": "12345678",
+            "WiFi-2.4G": "qwerty123",
+            "Hidden_EE:12": "letmein",
+            
+            # Default fallback for any network
+            "default": "password"
+        }
         
         logger.info("Mock Password Cracker initialized (DEBUG MODE)")
     
@@ -106,40 +115,63 @@ class MockPasswordCracker:
         self.crack_queue.put(handshake)
     
     def _crack_worker(self, worker_id: int):
-        """Worker thread for mock password cracking"""
-        logger.info(f"Mock crack worker {worker_id} started")
+        """Worker thread for mock password cracking - simulates John/Hashcat behavior"""
+        logger.info(f"Mock crack worker {worker_id} started (simulating John the Ripper + Hashcat)")
         
         while self.running:
             try:
                 # Get handshake from queue
                 handshake = self.crack_queue.get(timeout=1)
                 
-                logger.info(f"Mock Worker {worker_id}: Starting crack for {handshake['ssid']}")
+                logger.info(f"Mock Worker {worker_id}: Starting crack for {handshake['ssid']} (BSSID: {handshake['bssid']})")
+                logger.info(f"Mock Worker {worker_id}: Using handshake file: {handshake['file_path']}")
                 
-                # Simulate cracking time (10-30 seconds)
-                crack_time = random.uniform(10, 30)
-                if self.config['debug'].get('simulate_delays', True):
-                    time.sleep(crack_time)
+                # Simulate file readiness check (like real cracker)
+                time.sleep(1)  # Wait for file to be ready
+                
+                # Simulate realistic cracking time based on tool
+                # John the Ripper: 10-20s for simple passwords
+                # Hashcat: 5-15s for simple passwords
+                use_john = random.choice([True, False])
+                tool_name = "John the Ripper" if use_john else "Hashcat"
+                
+                if use_john:
+                    crack_time = random.uniform(10, 20)
+                    logger.info(f"Mock Worker {worker_id}: Using John the Ripper (hcx2john + --format=wpapsk)")
                 else:
-                    time.sleep(2)  # Quick mode
+                    crack_time = random.uniform(5, 15)
+                    logger.info(f"Mock Worker {worker_id}: Using Hashcat (-m 22000 -a 0)")
                 
-                # Simulate success rate (70%)
-                if random.random() < 0.7:
-                    password = random.choice(self.mock_passwords)
-                    
+                # Apply debug timing
+                if self.config['debug'].get('simulate_delays', True):
+                    # Show realistic progress updates
+                    for progress in [25, 50, 75]:
+                        time.sleep(crack_time / 4)
+                        logger.debug(f"Mock Worker {worker_id}: Cracking progress ~{progress}% ({tool_name})")
+                else:
+                    time.sleep(2)  # Quick mode for testing
+                
+                # Determine password based on SSID (realistic mapping)
+                password = self.mock_passwords.get(handshake['ssid'], self.mock_passwords['default'])
+                
+                # High success rate (85%) since we're using known weak passwords
+                if random.random() < 0.85:
                     # Save cracked password
                     self.db.add_cracked_password(
                         handshake_id=handshake['id'],
                         ssid=handshake['ssid'],
                         bssid=handshake['bssid'],
                         password=password,
+                        engine=tool_name,
                         crack_time=int(crack_time)
                     )
                     
-                    logger.info(f"Mock Worker {worker_id}: ✓ Cracked {handshake['ssid']} - "
-                               f"Password: {password} (took {int(crack_time)}s)")
+                    logger.info(f"Mock Worker {worker_id}: ✓ SUCCESS - Cracked {handshake['ssid']}")
+                    logger.info(f"Mock Worker {worker_id}: Password: '{password}' (found with {tool_name} in {int(crack_time)}s)")
                 else:
-                    logger.info(f"Mock Worker {worker_id}: ✗ Failed to crack {handshake['ssid']}")
+                    # Failed - password not in wordlist or file issue
+                    logger.warning(f"Mock Worker {worker_id}: ✗ FAILED - Could not crack {handshake['ssid']}")
+                    logger.warning(f"Mock Worker {worker_id}: Password not found in wordlist after {int(crack_time)}s")
                 
                 self.crack_queue.task_done()
             
@@ -147,7 +179,7 @@ class MockPasswordCracker:
                 # Queue is empty, this is normal - just wait for more work
                 pass
             except Exception as e:
-                logger.error(f"Mock worker {worker_id} error: {e}")
+                logger.error(f"Mock worker {worker_id} error: {e}", exc_info=True)
         
         logger.info(f"Mock crack worker {worker_id} stopped")
     

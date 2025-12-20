@@ -227,10 +227,6 @@ class WiFiScanner:
                     # Parse encryption
                     enc_type = self._parse_encryption(encryption, row)
                     
-                    # Skip if not in whitelist
-                    if self.whitelist_ssids and essid not in self.whitelist_ssids:
-                        continue
-                    
                     # Parse signal strength
                     try:
                         signal = int(power) if power and power != '-1' else -100
@@ -258,9 +254,10 @@ class WiFiScanner:
                         network_id = self.db.add_network(essid, bssid, channel_num, enc_type, signal)
                         self.networks[bssid]['id'] = network_id
                         
-                        # Set whitelist flag
-                        if essid in self.whitelist_ssids:
-                            self.db.set_whitelist(bssid, True)
+                        # Set whitelist flag (True if in whitelist, False otherwise)
+                        if self.whitelist_ssids:
+                            is_whitelisted = essid in self.whitelist_ssids
+                            self.db.set_whitelist(bssid, is_whitelisted)
                         
                         logger.info(f"✓ Found: {essid} ({bssid}) CH:{channel_num} {enc_type} {signal}dBm")
                         networks_found += 1
@@ -274,13 +271,18 @@ class WiFiScanner:
                         })
                         self.db.add_network(essid, bssid, channel_num, enc_type, signal)
                         
-                        # Update whitelist flag
-                        if essid in self.whitelist_ssids:
-                            self.db.set_whitelist(bssid, True)
+                        # Update whitelist flag (True if in whitelist, False otherwise)
+                        if self.whitelist_ssids:
+                            is_whitelisted = essid in self.whitelist_ssids
+                            self.db.set_whitelist(bssid, is_whitelisted)
                     
-                    # Start handshake capture if WPA/WPA2
+                    # Start handshake capture if WPA/WPA2 and in whitelist (or whitelist empty)
                     if 'WPA' in enc_type and bssid not in self.active_captures:
-                        self._start_handshake_capture(bssid, essid, channel_num)
+                        # Only attack if no whitelist or network is in whitelist
+                        if not self.whitelist_ssids or essid in self.whitelist_ssids:
+                            self._start_handshake_capture(bssid, essid, channel_num)
+                        else:
+                            logger.debug(f"Network {essid} discovered but not attacking - not in whitelist")
                 
                 except Exception as e:
                     logger.debug(f"Error parsing network row: {e}")

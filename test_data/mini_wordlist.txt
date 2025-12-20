@@ -43,3 +43,11 @@ user
 user123
 demo
 demo123
+
+# Mock network passwords (for realistic testing)
+mypassword
+guest2024
+Company2024
+qwerty123
+starbucks
+coffee123

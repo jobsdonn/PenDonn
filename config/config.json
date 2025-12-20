@@ -18,8 +18,11 @@
     "monitor_interface": "wlan1",
     "attack_interface": "wlan2",
     "management_interface": "wlan0",
+    "single_interface_mode": false,
+    "allow_management_wifi": false,
     "channel_hop_interval": 2,
-    "handshake_timeout": 300
+    "handshake_timeout": 300,
+    "comment": "Set single_interface_mode=true for RPi Zero 2 W with only onboard WiFi. WARNING: You will lose SSH connection!"
   },
   "whitelist": {
     "ssids": []
@@ -31,7 +34,16 @@
     "auto_start_cracking": true,
     "max_concurrent_cracks": 2,
     "john_format": "wpapsk",
-    "hashcat_mode": 22000
+    "hashcat_mode": 22000,
+    "hashcat_rules_dir": "./rules",
+    "use_rules": true,
+    "brute_force": false,
+    "brute_max_length": 8,
+    "session_prefix": "pendonn",
+    "extra_wordlists": [
+      "/usr/share/wordlists/rockyou.txt",
+      "./test_data/mini_wordlist.txt"
+    ]
   },
   "enumeration": {
     "enabled": true,

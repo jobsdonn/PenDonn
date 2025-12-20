@@ -1,0 +1,81 @@
+{
+  "system": {
+    "name": "PenDonn",
+    "version": "1.0.0",
+    "auto_start": true,
+    "log_level": "INFO",
+    "comment": "Raspberry Pi Zero 2 W configuration - Single onboard WiFi only"
+  },
+  "debug": {
+    "enabled": false,
+    "mock_wifi": false,
+    "mock_display": false,
+    "mock_cracking": false,
+    "test_data_generation": false,
+    "verbose_logging": false,
+    "simulate_delays": true
+  },
+  "wifi": {
+    "monitor_interface": "wlan0",
+    "attack_interface": "wlan0",
+    "management_interface": "wlan0",
+    "single_interface_mode": true,
+    "allow_management_wifi": true,
+    "channel_hop_interval": 2,
+    "handshake_timeout": 300,
+    "comment": "WARNING: single_interface_mode uses onboard WiFi (wlan0). You WILL lose SSH connection when monitoring starts. Ensure local access via HDMI+keyboard or enable auto-start on boot."
+  },
+  "whitelist": {
+    "ssids": [],
+    "comment": "Add your own networks here for testing, e.g. ['MyTestNetwork', 'HomeWiFi']"
+  },
+  "cracking": {
+    "enabled": true,
+    "engines": ["john", "hashcat"],
+    "wordlist_path": "/usr/share/wordlists/rockyou.txt",
+    "auto_start_cracking": true,
+    "max_concurrent_cracks": 1,
+    "john_format": "wpapsk",
+    "hashcat_mode": 22000,
+    "hashcat_rules_dir": "./rules",
+    "use_rules": true,
+    "brute_force": false,
+    "brute_max_length": 6,
+    "session_prefix": "pendonn",
+    "extra_wordlists": [
+      "/usr/share/wordlists/rockyou.txt",
+      "./test_data/mini_wordlist.txt"
+    ],
+    "comment": "Reduced max_concurrent_cracks and brute_max_length for RPi Zero 2 W limited CPU/RAM"
+  },
+  "enumeration": {
+    "enabled": false,
+    "auto_scan_on_crack": false,
+    "nmap_timing": "T2",
+    "port_scan_range": "1-1000",
+    "scan_timeout": 1800,
+    "comment": "Enumeration disabled by default on RPi Zero 2 W due to limited resources. Set to T2 timing (slower) if enabled."
+  },
+  "display": {
+    "enabled": true,
+    "type": "ssd1306",
+    "i2c_address": "0x3C",
+    "width": 128,
+    "height": 64,
+    "rotation": 0,
+    "update_interval": 1
+  },
+  "storage": {
+    "database_path": "./pendonn.db",
+    "handshake_dir": "./handshakes",
+    "log_dir": "./logs",
+    "backup_enabled": true,
+    "backup_interval": 3600
+  },
+  "performance": {
+    "comment": "Performance tuning for Raspberry Pi Zero 2 W (4 cores @ 1GHz, 512MB RAM)",
+    "max_threads": 2,
+    "buffer_size": 1024,
+    "low_memory_mode": true
+  }
+}
