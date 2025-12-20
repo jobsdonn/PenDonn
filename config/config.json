@@ -5,15 +5,6 @@
     "auto_start": true,
     "log_level": "INFO"
   },
-  "debug": {
-    "enabled": false,
-    "mock_wifi": false,
-    "mock_display": false,
-    "mock_cracking": false,
-    "test_data_generation": false,
-    "verbose_logging": false,
-    "simulate_delays": true
-  },
   "wifi": {
     "monitor_interface": "wlan1",
     "attack_interface": "wlan2",

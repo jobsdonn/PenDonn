@@ -48,14 +48,6 @@ class PenDonn:
         
         logger.info(f"PenDonn v{self.config['system']['version']}")
         
-        # Check if debug mode is enabled
-        self.debug_mode = self.config.get('debug', {}).get('enabled', False)
-        if self.debug_mode:
-            logger.warning("=" * 60)
-            logger.warning("DEBUG MODE ENABLED - Using mock hardware modules")
-            logger.warning("=" * 60)
-            logging.getLogger().setLevel(logging.DEBUG if self.config['debug'].get('verbose_logging') else logging.INFO)
-        
         # Initialize database
         logger.info("Initializing database...")
         self.db = Database(self.config['database']['path'])
@@ -65,24 +57,13 @@ class PenDonn:
         self.plugin_manager = PluginManager(self.config, self.db)
         self.plugin_manager.load_plugins()
         
-        # Initialize modules based on debug mode
+        # Initialize WiFi scanner
         logger.info("Initializing WiFi scanner...")
-        if self.debug_mode and self.config['debug'].get('mock_wifi', False):
-            from core.mock_wifi_monitor import MockWiFiMonitor
-            self.wifi_monitor = MockWiFiMonitor(self.config, self.db)
-        else:
-            # Use new airodump-based scanner (more reliable than Scapy)
-            from core.wifi_scanner import WiFiScanner
-            self.wifi_monitor = WiFiScanner(self.config, self.db)
+        from core.wifi_scanner import WiFiScanner
+        self.wifi_monitor = WiFiScanner(self.config, self.db)
         
         logger.info("Initializing password cracker...")
-        if self.debug_mode and self.config['debug'].get('mock_cracking', False):
-            from core.mock_cracker import MockPasswordCracker
-            self.cracker = MockPasswordCracker(self.config, self.db)
-        else:
-            # Cracker needs wifi_scanner reference to stop captures when password is cracked
-            # We'll set it after wifi_monitor is initialized
-            self.cracker = PasswordCracker(self.config, self.db, self.wifi_monitor)
+        self.cracker = PasswordCracker(self.config, self.db, self.wifi_monitor)
         
         logger.info("Initializing network enumerator...")
         self.enumerator = NetworkEnumerator(self.config, self.db, self.plugin_manager)
@@ -90,12 +71,8 @@ class PenDonn:
         # Initialize display
         if self.config['display']['enabled']:
             logger.info("Initializing display...")
-            if self.debug_mode and self.config['debug'].get('mock_display', False):
-                from core.mock_display import MockDisplay
-                self.display = MockDisplay(self.config, self.db)
-            else:
-                from core.display import Display
-                self.display = Display(self.config, self.db)
+            from core.display import Display
+            self.display = Display(self.config, self.db)
         else:
             self.display = None
         
