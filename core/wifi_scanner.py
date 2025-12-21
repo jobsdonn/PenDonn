@@ -404,7 +404,7 @@ class WiFiScanner:
                 '--write', capture_base,
                 '--output-format', 'cap',  # cap format (airodump ignores pcap anyway)
                 '--write-interval', '1',  # Write every second to capture all frames
-                self.interface
+                self.attack_interface  # Use attack interface for captures (wlan2)
             ]
             
             process = subprocess.Popen(cmd, 
