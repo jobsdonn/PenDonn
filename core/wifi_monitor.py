@@ -73,8 +73,27 @@ class WiFiMonitor:
             logger.warning("Whitelist is EMPTY - will attack ALL networks discovered!")
     
     def _detect_wifi_interfaces(self) -> List[str]:
-        """Detect external WiFi interfaces (exclude management interface)"""
+        """Detect external WiFi interfaces (exclude management interface with active connection)"""
         try:
+            # First, detect which interface has an active IP (this is management/SSH)
+            connected_interface = None
+            try:
+                addr_result = subprocess.run(['ip', 'addr', 'show'], capture_output=True, text=True, check=True)
+                current_iface = None
+                for line in addr_result.stdout.split('\n'):
+                    if 'wlan' in line and ': ' in line:
+                        parts = line.split(': ')
+                        if len(parts) >= 2:
+                            current_iface = parts[1].split('@')[0]
+                    elif 'inet ' in line and current_iface and 'scope global' in line:
+                        # This interface has an IP address
+                        connected_interface = current_iface
+                        logger.info(f"Detected connected interface: {connected_interface} (has active IP)")
+                        break
+            except Exception as e:
+                logger.warning(f"Could not detect connected interface: {e}")
+            
+            # Now detect all WiFi interfaces
             result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True, check=True)
             lines = result.stdout.split('\n')
             
@@ -88,16 +107,24 @@ class WiFiMonitor:
                     if len(parts) >= 2:
                         current_interface = parts[1].split('@')[0]  # Get interface name
                 
-                # Line with MAC: "    link/ether dc:a6:32:9e:ea:ba"
-                elif 'link/ether' in line and current_interface:
-                    mac = line.strip().split()[1].lower()
+                # Line with MAC: "    link/ether dc:a6:32:9e:ea:ba" or "    link/ieee802.11"
+                elif ('link/ether' in line or 'link/ieee802.11' in line) and current_interface:
+                    # Skip if this is the connected interface (SSH connection)
+                    if current_interface == connected_interface:
+                        logger.info(f"Skipping {current_interface} - has active SSH connection")
+                        current_interface = None
+                        continue
                     
-                    # Skip management interface
-                    if mac != self.management_mac.lower():
+                    # Extract MAC if available
+                    parts = line.strip().split()
+                    mac = parts[1] if len(parts) > 1 else "unknown"
+                    
+                    # Also check against hardcoded MAC as fallback
+                    if mac.lower() == self.management_mac.lower():
+                        logger.info(f"Skipping {current_interface} ({mac}) - matches management MAC")
+                    else:
                         external_interfaces.append(current_interface)
                         logger.info(f"Detected external WiFi: {current_interface} ({mac})")
-                    else:
-                        logger.info(f"Detected management WiFi: {current_interface} ({mac}) - will NOT use")
                     
                     current_interface = None
             
