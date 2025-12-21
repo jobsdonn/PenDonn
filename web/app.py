@@ -233,16 +233,17 @@ def export_data():
 
 @app.route('/api/database/reset', methods=['POST'])
 def reset_database():
-    """Reset database (with backup)"""
+    """Reset database (with backup and file cleanup)"""
     try:
         data = request.json
         keep_backup = data.get('keep_backup', True)
+        clean_files = data.get('clean_files', True)  # Default to cleaning files
         
-        db.reset_database(keep_backup=keep_backup)
+        db.reset_database(keep_backup=keep_backup, clean_files=clean_files)
         
         return jsonify({
             'success': True,
-            'message': 'Database reset successfully'
+            'message': 'Database reset successfully. Files cleaned.' if clean_files else 'Database reset successfully.'
         })
     except Exception as e:
         logger.error(f"Reset database error: {e}")

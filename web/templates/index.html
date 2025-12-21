@@ -1162,20 +1162,20 @@
         }
 
         async function resetDatabase() {
-            if (!confirm('Are you sure? This will delete all data (a backup will be created).')) return;
-            if (!confirm('FINAL WARNING: This action cannot be undone!')) return;
+            if (!confirm('Are you sure? This will delete all data and files (a backup will be created).')) return;
+            if (!confirm('FINAL WARNING: This action cannot be undone! Service will need restart.')) return;
             
             try {
                 const response = await fetch('/api/database/reset', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ keep_backup: true })
+                    body: JSON.stringify({ keep_backup: true, clean_files: true })
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
-                    alert('Database reset successfully');
+                    alert('Database reset successfully! IMPORTANT: Please restart the PenDonn service:\nsudo systemctl restart pendonn.service');
                     refreshData();
                 } else {
                     alert('Error: ' + data.error);

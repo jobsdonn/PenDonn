@@ -35,6 +35,19 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         return self.conn
     
+    def _ensure_connection(self):
+        """Ensure database connection is valid, reconnect if needed"""
+        try:
+            if self.conn is None:
+                return self.connect()
+            # Test if connection is alive
+            self.conn.execute("SELECT 1")
+            return self.conn
+        except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+            # Connection is closed or invalid, reconnect
+            logger.warning("Database connection lost, reconnecting...")
+            return self.connect()
+    
     def init_database(self):
         """Initialize database schema"""
         conn = self.connect()
@@ -155,6 +168,7 @@ class Database:
         network_id = cursor.lastrowid
         conn.commit()
         conn.close()
+        return network_id
         return network_id
     
     def get_networks(self, whitelisted: Optional[bool] = None) -> List[Dict]:
@@ -452,28 +466,26 @@ class Database:
             # Clean up captured files if requested
             if clean_files:
                 files_cleaned = 0
+                dirs_to_clean = [
+                    ("./captures", ['.cap', '.pcap', '.hccapx', '.22000']),
+                    ("./scan_results", ['.csv', '.txt', '.json', '.xml', '.gnmap', '.nmap']),
+                    ("./data", ['.backup'])  # Clean old database backups from data dir
+                ]
                 
-                # Clean handshake captures
-                captures_dir = "./captures"
-                if os.path.exists(captures_dir):
-                    for file in os.listdir(captures_dir):
-                        if file.endswith(('.cap', '.pcap', '.hccapx', '.22000')):
-                            try:
-                                os.remove(os.path.join(captures_dir, file))
-                                files_cleaned += 1
-                            except Exception as e:
-                                logger.warning(f"Could not delete {file}: {e}")
-                
-                # Clean scan results
-                scan_dir = "./scan_results"
-                if os.path.exists(scan_dir):
-                    for file in os.listdir(scan_dir):
-                        if file.endswith(('.csv', '.txt', '.json')):
-                            try:
-                                os.remove(os.path.join(scan_dir, file))
-                                files_cleaned += 1
-                            except Exception as e:
-                                logger.warning(f"Could not delete {file}: {e}")
+                for directory, extensions in dirs_to_clean:
+                    if os.path.exists(directory):
+                        for file in os.listdir(directory):
+                            # Skip the main database file
+                            if file == os.path.basename(self.db_path):
+                                continue
+                            # Check if file matches extensions
+                            if any(file.endswith(ext) for ext in extensions):
+                                try:
+                                    file_path = os.path.join(directory, file)
+                                    os.remove(file_path)
+                                    files_cleaned += 1
+                                except Exception as e:
+                                    logger.warning(f"Could not delete {file}: {e}")
                 
                 if files_cleaned > 0:
                     logger.info(f"Cleaned up {files_cleaned} capture/scan files")
