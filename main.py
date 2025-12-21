@@ -66,7 +66,7 @@ class PenDonn:
         self.cracker = PasswordCracker(self.config, self.db, self.wifi_monitor)
         
         logger.info("Initializing network enumerator...")
-        self.enumerator = NetworkEnumerator(self.config, self.db, self.plugin_manager)
+        self.enumerator = NetworkEnumerator(self.config, self.db, self.plugin_manager, self.wifi_monitor)
         
         # Initialize display
         if self.config['display']['enabled']:

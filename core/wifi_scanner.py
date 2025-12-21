@@ -50,10 +50,55 @@ class WiFiScanner:
         
         self.handshake_timeout = config['wifi']['handshake_timeout']
         
+        # Enumeration coordination
+        self.enumeration_active = False  # Flag to pause new captures during enumeration
+        self.enumeration_lock = threading.Lock()  # Lock for safe pause/resume
+        
         if self.whitelist_ssids:
             logger.info(f"Whitelist active: {list(self.whitelist_ssids)}")
         else:
             logger.warning("Whitelist EMPTY - will attack ALL networks!")
+    
+    def pause_for_enumeration(self):
+        """Pause wifi scanning/attacking for enumeration to use attack interface"""
+        with self.enumeration_lock:
+            if self.enumeration_active:
+                logger.warning("Enumeration already active")
+                return
+            
+            logger.info("🔒 Pausing WiFi scanner for enumeration...")
+            self.enumeration_active = True
+            
+            # Stop all active captures - enumeration needs the attack interface
+            for bssid in list(self.active_captures.keys()):
+                try:
+                    capture_info = self.active_captures[bssid]
+                    capture_info['process'].terminate()
+                    capture_info['process'].wait(timeout=5)
+                    logger.debug(f"Stopped capture for {capture_info['ssid']}")
+                except Exception as e:
+                    logger.debug(f"Error stopping capture: {e}")
+            
+            self.active_captures.clear()
+            logger.info("✓ WiFi scanner paused - enumeration can proceed")
+    
+    def resume_from_enumeration(self):
+        """Resume wifi scanning/attacking after enumeration completes"""
+        with self.enumeration_lock:
+            if not self.enumeration_active:
+                logger.warning("Enumeration was not active")
+                return
+            
+            logger.info("🔓 Resuming WiFi scanner after enumeration...")
+            self.enumeration_active = False
+            
+            # Re-enable monitor mode on attack interface in case enumeration changed it
+            try:
+                self._enable_monitor_mode(self.attack_interface)
+            except Exception as e:
+                logger.error(f"Failed to restore monitor mode: {e}")
+            
+            logger.info("✓ WiFi scanner resumed - normal operations")
     
     def _detect_wifi_interfaces(self) -> List[str]:
         """Detect external WiFi adapters"""
@@ -337,6 +382,11 @@ class WiFiScanner:
     def _start_handshake_capture(self, bssid: str, ssid: str, channel: int):
         """Start capturing handshake for a network"""
         try:
+            # Skip if enumeration is using the attack interface
+            if self.enumeration_active:
+                logger.debug(f"Skipping capture for {ssid} - enumeration in progress")
+                return
+            
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             bssid_clean = bssid.replace(':', '')
             capture_base = os.path.join(self.handshake_dir, f"{bssid_clean}_{timestamp}")

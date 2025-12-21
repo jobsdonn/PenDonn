@@ -20,11 +20,19 @@ logger = logging.getLogger(__name__)
 class NetworkEnumerator:
     """Network enumeration and vulnerability scanning"""
     
-    def __init__(self, config: Dict, database, plugin_manager):
-        """Initialize network enumerator"""
+    def __init__(self, config: Dict, database, plugin_manager, wifi_scanner=None):
+        """Initialize network enumerator
+        
+        Args:
+            config: Configuration dict
+            database: Database instance
+            plugin_manager: Plugin manager instance
+            wifi_scanner: WiFi scanner instance for interface coordination (optional)
+        """
         self.config = config
         self.db = database
         self.plugin_manager = plugin_manager
+        self.wifi_scanner = wifi_scanner  # For coordinating interface usage
         
         self.enabled = config['enumeration']['enabled']
         self.auto_scan = config['enumeration']['auto_scan_on_crack']
@@ -32,8 +40,16 @@ class NetworkEnumerator:
         self.port_range = config['enumeration']['port_scan_range']
         self.scan_timeout = config['enumeration']['scan_timeout']
         
+        # Use attack interface for enumeration (wlan2) instead of management (wlan0)
+        # This prevents killing SSH connection
+        self.enumeration_interface = config['wifi'].get('attack_interface', 'wlan2')
+        self.management_interface = config['wifi']['management_interface']  # wlan0 - never touch this!
+        
         self.running = False
         self.active_scans = {}  # scan_id -> scan_info
+        self.scanned_networks = set()  # Track which networks have been scanned
+        
+        logger.info(f"Enumeration will use {self.enumeration_interface} (attacks will pause during enumeration)")
         
         # Initialize nmap only if available
         try:
@@ -147,6 +163,26 @@ class NetworkEnumerator:
         try:
             logger.info(f"Performing enumeration for {ssid} (scan_id: {scan_id})")
             
+            # SAFETY CHECK: Don't enumerate if we're currently connected to this network
+            # This would disconnect our management interface and kill SSH/remote access
+            try:
+                mgmt_interface = self.config['wifi']['management_interface']
+                current_network = subprocess.run(['iwgetid', mgmt_interface, '-r'],
+                                               capture_output=True, text=True, timeout=5)
+                if current_network.returncode == 0 and current_network.stdout.strip() == ssid:
+                    logger.warning(f"⚠️  Skipping enumeration of {ssid} - currently connected (would kill SSH)")
+                    logger.warning(f"💡 Tip: Use a 4th WiFi adapter for enumeration to avoid this")
+                    results = {
+                        'ssid': ssid,
+                        'bssid': bssid,
+                        'error': 'Cannot enumerate current management network (would disconnect SSH)',
+                        'error_type': 'SafetyCheck'
+                    }
+                    self.db.update_scan(scan_id, 'failed', results, 0)
+                    return
+            except Exception as e:
+                logger.debug(f"Could not check current network: {e}")
+            
             vulnerabilities_found = 0
             results = {
                 'ssid': ssid,
@@ -235,8 +271,22 @@ class NetworkEnumerator:
                 del self.active_scans[scan_id]
     
     def _connect_to_network(self, ssid: str, password: str) -> bool:
-        """Connect to target network"""
+        """Connect to target network using enumeration interface (wlan2)"""
         try:
+            # Pause attacks to borrow wlan2
+            if self.wifi_scanner:
+                logger.info("Pausing attacks to use wlan2 for enumeration")
+                self.wifi_scanner.pause_for_enumeration()
+            
+            interface = self.enumeration_interface
+            logger.info(f"Switching {interface} from monitor to managed mode")
+            
+            # Switch wlan2 from monitor to managed mode
+            subprocess.run(['ip', 'link', 'set', interface, 'down'], check=True)
+            subprocess.run(['iw', interface, 'set', 'type', 'managed'], check=True)
+            subprocess.run(['ip', 'link', 'set', interface, 'up'], check=True)
+            time.sleep(2)
+            
             # Create WPA supplicant configuration
             wpa_conf = f"""
 network={{
@@ -249,15 +299,13 @@ network={{
             with open(conf_file, 'w') as f:
                 f.write(wpa_conf)
             
-            # Get management interface
-            interface = self.config['wifi']['management_interface']
-            
             # Kill existing wpa_supplicant
             subprocess.run(['killall', 'wpa_supplicant'], 
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(1)
             
-            # Start wpa_supplicant
+            # Start wpa_supplicant on enumeration interface
+            logger.info(f"Starting wpa_supplicant on {interface}")
             subprocess.Popen([
                 'wpa_supplicant',
                 '-B',  # Background
@@ -267,11 +315,27 @@ network={{
             
             time.sleep(5)
             
-            # Get IP address via DHCP
-            subprocess.run(['dhclient', '-r', interface], 
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            result = subprocess.run(['dhclient', interface], 
-                                  capture_output=True, timeout=30)
+            # Get IP address via DHCP (try dhcpcd first, then dhclient)
+            logger.info(f"Requesting IP address on {interface}")
+            dhcp_success = False
+            
+            # Check for dhcpcd (Raspberry Pi OS)
+            if subprocess.run(['which', 'dhcpcd'], capture_output=True).returncode == 0:
+                subprocess.run(['dhcpcd', '-k', interface], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                result = subprocess.run(['dhcpcd', interface], 
+                                      capture_output=True, timeout=30)
+                dhcp_success = result.returncode == 0
+            # Fallback to dhclient
+            elif subprocess.run(['which', 'dhclient'], capture_output=True).returncode == 0:
+                subprocess.run(['dhclient', '-r', interface], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                result = subprocess.run(['dhclient', interface], 
+                                      capture_output=True, timeout=30)
+                dhcp_success = result.returncode == 0
+            else:
+                logger.error("Neither dhcpcd nor dhclient found")
+                return False
             
             time.sleep(3)
             
@@ -280,23 +344,35 @@ network={{
                                   capture_output=True, text=True)
             
             if 'inet ' in result.stdout:
-                logger.info(f"Successfully connected to {ssid}")
+                logger.info(f"Successfully connected to {ssid} on {interface}")
                 return True
-            
-            return False
+            else:
+                logger.error(f"Failed to obtain IP on {interface}")
+                return False
         
+        except subprocess.TimeoutExpired:
+            logger.error(f"DHCP timeout on {interface}")
+            return False
+        except FileNotFoundError as e:
+            logger.error(f"Required tool not found: {e}")
+            return False
         except Exception as e:
             logger.error(f"Connection error: {e}")
             return False
     
     def _disconnect_from_network(self):
-        """Disconnect from current network"""
+        """Disconnect from network and restore monitor mode on enumeration interface"""
+        interface = self.enumeration_interface
+        
         try:
-            interface = self.config['wifi']['management_interface']
+            logger.info(f"Disconnecting from network on {interface}")
+            
+            # Kill wpa_supplicant
             subprocess.run(['killall', 'wpa_supplicant'], 
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1)
             
-            # Try dhcpcd first, then dhclient
+            # Release DHCP (try dhcpcd first, then dhclient)
             if subprocess.run(['which', 'dhcpcd'], capture_output=True).returncode == 0:
                 subprocess.run(['dhcpcd', '-k', interface], 
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -304,15 +380,45 @@ network={{
                 subprocess.run(['dhclient', '-r', interface], 
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            logger.info("Disconnected from network")
         except Exception as e:
-            logger.error(f"Disconnection error: {e}")
+            logger.error(f"Error during disconnection: {e}")
+        
+        finally:
+            # CRITICAL: Always restore monitor mode and resume attacks
+            try:
+                logger.info(f"Restoring {interface} to monitor mode")
+                subprocess.run(['ip', 'link', 'set', interface, 'down'], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(['iw', interface, 'set', 'monitor', 'control'], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(['ip', 'link', 'set', interface, 'up'], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(2)
+                
+                # Resume attacks
+                if self.wifi_scanner:
+                    logger.info("Resuming attacks")
+                    self.wifi_scanner.resume_from_enumeration()
+                    
+                logger.info(f"Successfully restored {interface} to monitor mode")
+                
+            except Exception as e:
+                logger.critical(f"FAILED to restore {interface} to monitor mode: {e}")
+                logger.critical("Manual intervention required: iw wlan2 set monitor control")
+                # Try emergency restore
+                try:
+                    subprocess.run(['ifconfig', interface, 'down'], check=False)
+                    subprocess.run(['iwconfig', interface, 'mode', 'monitor'], check=False)
+                    subprocess.run(['ifconfig', interface, 'up'], check=False)
+                    logger.warning("Emergency restore attempted with ifconfig/iwconfig")
+                except:
+                    pass
     
     def _discover_hosts(self) -> List[str]:
         """Discover active hosts on network"""
         try:
-            # Get local IP and network
-            interface = self.config['wifi']['management_interface']
+            # Use enumeration interface (wlan2) not management interface
+            interface = self.enumeration_interface
             result = subprocess.run(['ip', 'addr', 'show', interface], 
                                   capture_output=True, text=True)
             
@@ -326,7 +432,7 @@ network={{
             network = ip_match.group(1)
             
             # Ping scan for host discovery
-            logger.info(f"Scanning network: {network}")
+            logger.info(f"Scanning network: {network} on {interface}")
             self.nm.scan(hosts=network, arguments=f'-sn {self.nmap_timing}')
             
             hosts = []
