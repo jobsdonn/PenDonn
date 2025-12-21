@@ -276,10 +276,6 @@ class NetworkEnumerator:
         Returns:
             tuple: (success: bool, error_message: str)
         """
-        
-        Returns:
-            tuple: (success: bool, error_message: str)
-        """
         try:
             # Pause attacks to borrow wlan2
             if self.wifi_scanner:
