@@ -299,10 +299,18 @@ network={{
             with open(conf_file, 'w') as f:
                 f.write(wpa_conf)
             
-            # Kill existing wpa_supplicant
-            subprocess.run(['killall', 'wpa_supplicant'], 
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(1)
+            # Kill only wpa_supplicant for this specific interface (not all!)
+            # Using killall would kill the management interface's wpa_supplicant too
+            try:
+                result = subprocess.run(['pgrep', '-f', f'wpa_supplicant.*{interface}'], 
+                                      capture_output=True, text=True)
+                if result.stdout.strip():
+                    pids = result.stdout.strip().split('\n')
+                    for pid in pids:
+                        subprocess.run(['kill', pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    time.sleep(1)
+            except Exception as e:
+                logger.warning(f"Could not kill existing wpa_supplicant for {interface}: {e}")
             
             # Start wpa_supplicant on enumeration interface
             logger.info(f"Starting wpa_supplicant on {interface}")
@@ -321,9 +329,11 @@ network={{
             
             # Check for dhcpcd (Raspberry Pi OS)
             if subprocess.run(['which', 'dhcpcd'], capture_output=True).returncode == 0:
+                # Use -e flag to only affect this interface (don't touch others!)
                 subprocess.run(['dhcpcd', '-k', interface], 
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                result = subprocess.run(['dhcpcd', interface], 
+                # -n = don't replace routes, -w = wait for configuration
+                result = subprocess.run(['dhcpcd', '-n', '-w', interface], 
                                       capture_output=True, timeout=30)
                 dhcp_success = result.returncode == 0
             # Fallback to dhclient
@@ -367,10 +377,17 @@ network={{
         try:
             logger.info(f"Disconnecting from network on {interface}")
             
-            # Kill wpa_supplicant
-            subprocess.run(['killall', 'wpa_supplicant'], 
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(1)
+            # Kill only wpa_supplicant for this interface (not management interface!)
+            try:
+                result = subprocess.run(['pgrep', '-f', f'wpa_supplicant.*{interface}'], 
+                                      capture_output=True, text=True)
+                if result.stdout.strip():
+                    pids = result.stdout.strip().split('\n')
+                    for pid in pids:
+                        subprocess.run(['kill', pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    time.sleep(1)
+            except Exception as e:
+                logger.warning(f"Could not kill wpa_supplicant for {interface}: {e}")
             
             # Release DHCP (try dhcpcd first, then dhclient)
             if subprocess.run(['which', 'dhcpcd'], capture_output=True).returncode == 0:
