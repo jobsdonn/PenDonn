@@ -333,11 +333,21 @@ network={{
             
             # Check for dhcpcd (Raspberry Pi OS)
             if subprocess.run(['which', 'dhcpcd'], capture_output=True).returncode == 0:
-                # Use -e flag to only affect this interface (don't touch others!)
-                subprocess.run(['dhcpcd', '-k', interface], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                # -n = don't replace routes, -w = wait for configuration
-                result = subprocess.run(['dhcpcd', '-n', '-w', interface], 
+                # Kill any existing dhcpcd for this interface to avoid conflicts
+                try:
+                    result = subprocess.run(['pgrep', '-f', f'dhcpcd.*{interface}'], 
+                                          capture_output=True, text=True)
+                    if result.stdout.strip():
+                        pids = result.stdout.strip().split('\n')
+                        for pid in pids:
+                            subprocess.run(['kill', pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        time.sleep(1)
+                        logger.info(f"Killed existing dhcpcd for {interface}")
+                except Exception as e:
+                    logger.warning(f"Could not kill existing dhcpcd: {e}")
+                
+                # Start fresh dhcpcd: -4 = IPv4 only, -L = don't daemonize, -w = wait
+                result = subprocess.run(['dhcpcd', '-4', '-w', interface], 
                                       capture_output=True, timeout=30)
                 dhcp_success = result.returncode == 0
             # Fallback to dhclient
