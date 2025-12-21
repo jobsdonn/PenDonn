@@ -916,6 +916,16 @@
                     
                     html += '</tbody></table>';
                     content.innerHTML = html;
+                    
+                    // Restore expanded state after refresh
+                    expandedScans.forEach(id => {
+                        const detailsRow = document.getElementById(id);
+                        const icon = document.getElementById(id + '-icon');
+                        if (detailsRow && icon) {
+                            detailsRow.style.display = 'table-row';
+                            icon.textContent = '▼';
+                        }
+                    });
                 } else {
                     content.innerHTML = '<div class="empty-state">No scans performed yet</div>';
                 }
@@ -925,15 +935,20 @@
             }
         }
         
+        // Track which scan details are expanded
+        const expandedScans = new Set();
+        
         function toggleScanDetails(id) {
             const detailsRow = document.getElementById(id);
             const icon = document.getElementById(id + '-icon');
             if (detailsRow.style.display === 'none') {
                 detailsRow.style.display = 'table-row';
                 icon.textContent = '▼';
+                expandedScans.add(id);  // Remember this is expanded
             } else {
                 detailsRow.style.display = 'none';
                 icon.textContent = '▶';
+                expandedScans.delete(id);  // Remember this is collapsed
             }
         }
 

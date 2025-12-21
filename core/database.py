@@ -436,21 +436,72 @@ class Database:
         logger.info(f"Data exported to {export_path}")
         return export_path
     
-    def reset_database(self, keep_backup: bool = True):
-        """Reset database (clear all data)"""
-        if keep_backup:
-            backup_path = f"{self.db_path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            shutil.copy2(self.db_path, backup_path)
-            logger.info(f"Database backed up to {backup_path} before reset")
+    def reset_database(self, keep_backup: bool = True, clean_files: bool = True):
+        """Reset database (clear all data and reinitialize)
         
-        if self.conn:
-            self.conn.close()
-        
-        if os.path.exists(self.db_path):
-            os.remove(self.db_path)
-        
-        self.init_database()
-        logger.warning("Database has been reset")
+        Args:
+            keep_backup: Create backup before reset
+            clean_files: Also delete captured files (handshakes, scan results)
+        """
+        try:
+            if keep_backup:
+                backup_path = f"{self.db_path}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                shutil.copy2(self.db_path, backup_path)
+                logger.info(f"Database backed up to {backup_path} before reset")
+            
+            # Clean up captured files if requested
+            if clean_files:
+                files_cleaned = 0
+                
+                # Clean handshake captures
+                captures_dir = "./captures"
+                if os.path.exists(captures_dir):
+                    for file in os.listdir(captures_dir):
+                        if file.endswith(('.cap', '.pcap', '.hccapx', '.22000')):
+                            try:
+                                os.remove(os.path.join(captures_dir, file))
+                                files_cleaned += 1
+                            except Exception as e:
+                                logger.warning(f"Could not delete {file}: {e}")
+                
+                # Clean scan results
+                scan_dir = "./scan_results"
+                if os.path.exists(scan_dir):
+                    for file in os.listdir(scan_dir):
+                        if file.endswith(('.csv', '.txt', '.json')):
+                            try:
+                                os.remove(os.path.join(scan_dir, file))
+                                files_cleaned += 1
+                            except Exception as e:
+                                logger.warning(f"Could not delete {file}: {e}")
+                
+                if files_cleaned > 0:
+                    logger.info(f"Cleaned up {files_cleaned} capture/scan files")
+            
+            # Close current connection
+            if self.conn:
+                self.conn.close()
+                self.conn = None
+            
+            # Delete old database file
+            if os.path.exists(self.db_path):
+                os.remove(self.db_path)
+                logger.info(f"Deleted old database: {self.db_path}")
+            
+            # Recreate database with fresh schema
+            self._ensure_directory()
+            self.init_database()
+            
+            # Verify new database is working
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            logger.info(f"Database reset complete. Tables created: {', '.join(tables)}")
+            
+            logger.warning("Database has been reset successfully")
+        except Exception as e:
+            logger.error(f"Error resetting database: {e}")
+            raise
     
     def close(self):
         """Close database connection"""

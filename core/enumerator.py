@@ -615,6 +615,7 @@ network={{
     def _run_plugins(self, scan_id: int, hosts: List[str], scan_results: List[Dict]) -> Dict:
         """Run vulnerability scanner plugins"""
         plugin_results = {
+            'status': 'completed',  # Set default status
             'plugins_run': [],
             'vulnerabilities_found': 0
         }
