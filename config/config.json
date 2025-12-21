@@ -6,9 +6,9 @@
     "log_level": "INFO"
   },
   "wifi": {
-    "monitor_interface": "wlan1",
-    "attack_interface": "wlan2",
-    "management_interface": "wlan0",
+    "monitor_interface": "wlan0",
+    "attack_interface": "wlan1",
+    "management_interface": "wlan2",
     "single_interface_mode": false,
     "allow_management_wifi": false,
     "channel_hop_interval": 2,
