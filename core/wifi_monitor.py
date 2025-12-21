@@ -97,6 +97,8 @@ class WiFiMonitor:
             result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True, check=True)
             lines = result.stdout.split('\n')
             
+            logger.info(f"Scanning for WiFi interfaces, connected interface: {connected_interface}")
+            
             external_interfaces = []
             current_interface = None
             
@@ -128,6 +130,7 @@ class WiFiMonitor:
                     
                     current_interface = None
             
+            logger.info(f"Detection complete: found {len(external_interfaces)} external interfaces: {external_interfaces}")
             return external_interfaces
             
         except Exception as e:
