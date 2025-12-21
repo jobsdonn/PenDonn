@@ -270,8 +270,16 @@ class NetworkEnumerator:
             if scan_id in self.active_scans:
                 del self.active_scans[scan_id]
     
-    def _connect_to_network(self, ssid: str, password: str) -> bool:
-        """Connect to target network using enumeration interface (wlan2)"""
+    def _connect_to_network(self, ssid: str, password: str) -> tuple:
+        """Connect to target network using enumeration interface (wlan2)
+        
+        Returns:
+            tuple: (success: bool, error_message: str)
+        """
+        
+        Returns:
+            tuple: (success: bool, error_message: str)
+        """
         try:
             # Pause attacks to borrow wlan2
             if self.wifi_scanner:
@@ -344,8 +352,9 @@ network={{
                                       capture_output=True, timeout=30)
                 dhcp_success = result.returncode == 0
             else:
-                logger.error("Neither dhcpcd nor dhclient found")
-                return False
+                error_msg = "Neither dhcpcd nor dhclient found"
+                logger.error(error_msg)
+                return (False, error_msg)
             
             time.sleep(3)
             
@@ -355,20 +364,24 @@ network={{
             
             if 'inet ' in result.stdout:
                 logger.info(f"Successfully connected to {ssid} on {interface}")
-                return True
+                return (True, "")
             else:
-                logger.error(f"Failed to obtain IP on {interface}")
-                return False
+                error_msg = f"Failed to obtain IP on {interface}"
+                logger.error(error_msg)
+                return (False, error_msg)
         
         except subprocess.TimeoutExpired:
-            logger.error(f"DHCP timeout on {interface}")
-            return False
+            error_msg = f"DHCP timeout on {interface}"
+            logger.error(error_msg)
+            return (False, error_msg)
         except FileNotFoundError as e:
-            logger.error(f"Required tool not found: {e}")
-            return False
+            error_msg = f"Required tool not found: {e}"
+            logger.error(error_msg)
+            return (False, error_msg)
         except Exception as e:
-            logger.error(f"Connection error: {e}")
-            return False
+            error_msg = f"Connection error: {e}"
+            logger.error(error_msg)
+            return (False, error_msg)
     
     def _disconnect_from_network(self):
         """Disconnect from network and restore monitor mode on enumeration interface"""
