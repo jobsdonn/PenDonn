@@ -154,7 +154,7 @@ class PasswordCracker:
             
             # Skip if password already cracked for this network
             if self.db.get_password_for_network(bssid):
-                logger.info(f"Password already cracked for {ssid} ({bssid}) - skipping handshake {handshake_id}")
+                logger.debug(f"Password already cracked for {ssid} ({bssid}) - skipping handshake {handshake_id}")
                 return
             
             if handshake_id not in self.active_cracks:

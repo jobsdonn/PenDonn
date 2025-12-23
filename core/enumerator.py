@@ -40,16 +40,17 @@ class NetworkEnumerator:
         self.port_range = config['enumeration']['port_scan_range']
         self.scan_timeout = config['enumeration']['scan_timeout']
         
-        # Use attack interface for enumeration (wlan2) instead of management (wlan0)
-        # This prevents killing SSH connection
-        self.enumeration_interface = config['wifi'].get('attack_interface', 'wlan2')
-        self.management_interface = config['wifi']['management_interface']  # wlan0 - never touch this!
+        # Use attack interface from config for enumeration (wlan1)
+        # NEVER use management_interface - that's the SSH connection!
+        # Attacks will pause during enumeration
+        self.enumeration_interface = config['wifi']['attack_interface']
+        self.management_interface = config['wifi']['management_interface']
         
         self.running = False
         self.active_scans = {}  # scan_id -> scan_info
         self.scanned_networks = set()  # Track which networks have been scanned
         
-        logger.info(f"Enumeration will use {self.enumeration_interface} (attacks will pause during enumeration)")
+        logger.info(f"Enumeration will use {self.enumeration_interface} (NOT {self.management_interface}). Attacks will pause during enumeration.")
         
         # Initialize nmap only if available
         try:
@@ -163,25 +164,9 @@ class NetworkEnumerator:
         try:
             logger.info(f"Performing enumeration for {ssid} (scan_id: {scan_id})")
             
-            # SAFETY CHECK: Don't enumerate if we're currently connected to this network
-            # This would disconnect our management interface and kill SSH/remote access
-            try:
-                mgmt_interface = self.config['wifi']['management_interface']
-                current_network = subprocess.run(['iwgetid', mgmt_interface, '-r'],
-                                               capture_output=True, text=True, timeout=5)
-                if current_network.returncode == 0 and current_network.stdout.strip() == ssid:
-                    logger.warning(f"⚠️  Skipping enumeration of {ssid} - currently connected (would kill SSH)")
-                    logger.warning(f"💡 Tip: Use a 4th WiFi adapter for enumeration to avoid this")
-                    results = {
-                        'ssid': ssid,
-                        'bssid': bssid,
-                        'error': 'Cannot enumerate current management network (would disconnect SSH)',
-                        'error_type': 'SafetyCheck'
-                    }
-                    self.db.update_scan(scan_id, 'failed', results, 0)
-                    return
-            except Exception as e:
-                logger.debug(f"Could not check current network: {e}")
+            # REMOVED SAFETY CHECK: We're using wlan1 (attack_interface) for enumeration,
+            # NOT the management interface (wlan2), so it's safe to enumerate any network
+            # The enumeration interface will switch to managed mode temporarily while management stays up
             
             vulnerabilities_found = 0
             results = {
@@ -333,7 +318,7 @@ network={{
             
             # Check for dhcpcd (Raspberry Pi OS)
             if subprocess.run(['which', 'dhcpcd'], capture_output=True).returncode == 0:
-                # Kill any existing dhcpcd for this interface to avoid conflicts
+                # Kill any existing dhcpcd for this interface ONLY (not the system-wide daemon!)
                 try:
                     result = subprocess.run(['pgrep', '-f', f'dhcpcd.*{interface}'], 
                                           capture_output=True, text=True)
@@ -346,8 +331,12 @@ network={{
                 except Exception as e:
                     logger.warning(f"Could not kill existing dhcpcd: {e}")
                 
-                # Start fresh dhcpcd: -4 = IPv4 only, -L = don't daemonize, -w = wait
-                result = subprocess.run(['dhcpcd', '-4', '-w', interface], 
+                # Use dhcpcd in one-shot mode to avoid interfering with management interface
+                # -n = one-shot (don't fork/daemonize)
+                # -4 = IPv4 only
+                # -w = wait for IP
+                logger.info(f"Running dhcpcd in one-shot mode for {interface} only")
+                result = subprocess.run(['dhcpcd', '-n', '-4', '-w', interface], 
                                       capture_output=True, timeout=30)
                 dhcp_success = result.returncode == 0
             # Fallback to dhclient

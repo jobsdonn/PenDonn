@@ -561,24 +561,58 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     if [ "$INTERFACE_COUNT" -ge 3 ]; then
         echo -e "${YELLOW}Available interfaces:${NC}"
         for i in "${!INTERFACES[@]}"; do
-            echo "  $((i+1)). ${INTERFACES[$i]}"
+            IFACE="${INTERFACES[$i]}"
+            MAC=$(cat /sys/class/net/$IFACE/address 2>/dev/null || echo "unknown")
+            # Check if this is likely the onboard WiFi (dc:a6:32:* for Pi)
+            if [[ $MAC == dc:a6:32:* ]]; then
+                echo "  $((i+1)). $IFACE ($MAC) [ONBOARD - recommended for MANAGEMENT]"
+            else
+                echo "  $((i+1)). $IFACE ($MAC) [USB adapter]"
+            fi
         done
         echo ""
         
-        # Management interface
-        read -p "Select MANAGEMENT interface (1-$INTERFACE_COUNT) [1]: " MGMT_CHOICE
-        MGMT_CHOICE=${MGMT_CHOICE:-1}
+        # Try to auto-detect the onboard WiFi for management
+        ONBOARD_IDX=""
+        for i in "${!INTERFACES[@]}"; do
+            IFACE="${INTERFACES[$i]}"
+            MAC=$(cat /sys/class/net/$IFACE/address 2>/dev/null || echo "unknown")
+            if [[ $MAC == dc:a6:32:* ]]; then
+                ONBOARD_IDX=$((i+1))
+                break
+            fi
+        done
+        
+        # Management interface (default to onboard if found, otherwise last interface)
+        if [ -n "$ONBOARD_IDX" ]; then
+            read -p "Select MANAGEMENT interface (1-$INTERFACE_COUNT) [$ONBOARD_IDX (onboard WiFi - keeps SSH)]: " MGMT_CHOICE
+            MGMT_CHOICE=${MGMT_CHOICE:-$ONBOARD_IDX}
+        else
+            read -p "Select MANAGEMENT interface (1-$INTERFACE_COUNT) [$INTERFACE_COUNT (last interface)]: " MGMT_CHOICE
+            MGMT_CHOICE=${MGMT_CHOICE:-$INTERFACE_COUNT}
+        fi
         MGMT_IFACE=${INTERFACES[$((MGMT_CHOICE-1))]}
         
-        # Monitor interface
-        read -p "Select MONITOR interface (1-$INTERFACE_COUNT) [2]: " MON_CHOICE
-        MON_CHOICE=${MON_CHOICE:-2}
+        # Monitor interface (default to first USB adapter)
+        read -p "Select MONITOR interface (1-$INTERFACE_COUNT) [1 (scanning)]: " MON_CHOICE
+        MON_CHOICE=${MON_CHOICE:-1}
         MON_IFACE=${INTERFACES[$((MON_CHOICE-1))]}
         
-        # Attack interface
-        read -p "Select ATTACK interface (1-$INTERFACE_COUNT) [3]: " ATK_CHOICE
-        ATK_CHOICE=${ATK_CHOICE:-3}
+        # Attack interface (default to second USB adapter)
+        read -p "Select ATTACK interface (1-$INTERFACE_COUNT) [2 (handshakes)]: " ATK_CHOICE
+        ATK_CHOICE=${ATK_CHOICE:-2}
         ATK_IFACE=${INTERFACES[$((ATK_CHOICE-1))]}
+        
+        # Validate that all three interfaces are different
+        if [ "$MGMT_IFACE" = "$MON_IFACE" ] || [ "$MGMT_IFACE" = "$ATK_IFACE" ] || [ "$MON_IFACE" = "$ATK_IFACE" ]; then
+            print_error "ERROR: You must select three DIFFERENT interfaces!"
+            echo "  Management: $MGMT_IFACE"
+            echo "  Monitor:    $MON_IFACE"
+            echo "  Attack:     $ATK_IFACE"
+            echo ""
+            echo "Please run the installer again and select different interfaces."
+            exit 1
+        fi
         
         echo ""
         echo -e "${GREEN}Selected interfaces:${NC}"

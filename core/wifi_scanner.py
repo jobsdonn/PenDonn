@@ -30,10 +30,13 @@ class WiFiScanner:
         if not detected:
             raise Exception("No external WiFi adapter found!")
         
+        logger.info(f"Detected external WiFi adapters: {detected}")
+        
         self.interface = detected[0]  # Use first external adapter (monitor)
         self.attack_interface = detected[1] if len(detected) >= 2 else detected[0]  # Use second adapter for attack if available
-        logger.info(f"Using WiFi interface: {self.interface}")
-        logger.info(f"Using attack interface: {self.attack_interface}")
+        logger.info(f"Using WiFi interface: {self.interface} (scanning)")
+        logger.info(f"Using attack interface: {self.attack_interface} (deauth)")
+        logger.info(f"Management interface (DO NOT TOUCH): wlan2 (dc:a6:32:9e:ea:ba)")
         
         self.whitelist_ssids = set(config['whitelist']['ssids'])
         self.running = False
