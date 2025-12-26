@@ -1,0 +1,7 @@
+{
+  "name": "FTP Vulnerability Scanner",
+  "description": "Tests for anonymous FTP and weak credentials",
+  "version": "1.0.0",
+  "author": "PenDonn",
+  "enabled": true
+}

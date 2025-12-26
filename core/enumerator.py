@@ -13,6 +13,7 @@ import socket
 from datetime import datetime
 from typing import Dict, List, Optional
 import nmap
+from .interface_manager import resolve_interfaces
 
 logger = logging.getLogger(__name__)
 
@@ -40,17 +41,18 @@ class NetworkEnumerator:
         self.port_range = config['enumeration']['port_scan_range']
         self.scan_timeout = config['enumeration']['scan_timeout']
         
-        # Use attack interface from config for enumeration (wlan1)
-        # NEVER use management_interface - that's the SSH connection!
-        # Attacks will pause during enumeration
-        self.enumeration_interface = config['wifi']['attack_interface']
-        self.management_interface = config['wifi']['management_interface']
+        # Resolve interfaces by MAC address (handles USB adapter name swapping)
+        # Use monitor interface for enumeration - it switches from monitor to managed mode
+        # Attacks will pause during enumeration (same interface used for scanning)
+        interfaces = resolve_interfaces(config)
+        self.enumeration_interface = interfaces['monitor']  # Use monitor interface (Realtek 8812AU - supports both modes)
+        self.management_interface = interfaces['management']
         
         self.running = False
         self.active_scans = {}  # scan_id -> scan_info
         self.scanned_networks = set()  # Track which networks have been scanned
         
-        logger.info(f"Enumeration will use {self.enumeration_interface} (NOT {self.management_interface}). Attacks will pause during enumeration.")
+        logger.info(f"Enumeration will use {self.enumeration_interface} (monitor interface - supports both modes). Attacks will pause during enumeration.")
         
         # Initialize nmap only if available
         try:

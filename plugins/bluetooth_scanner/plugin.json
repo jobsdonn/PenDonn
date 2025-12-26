@@ -1,0 +1,9 @@
+{
+  "name": "Bluetooth Scanner",
+  "version": "1.0.0",
+  "description": "Scans for Bluetooth devices and services, detecting potential vulnerabilities",
+  "author": "PenDonn Team",
+  "enabled": true,
+  "module": "bluetooth_scanner.py",
+  "class": "BluetoothScanner"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "SNMP Scanner",
+  "description": "Tests for weak SNMP community strings and extracts system information",
+  "version": "1.0.0",
+  "author": "PenDonn",
+  "enabled": true
+}

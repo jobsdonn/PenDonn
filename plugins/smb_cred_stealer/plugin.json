@@ -1,0 +1,7 @@
+{
+  "name": "SMB Credential Stealer",
+  "description": "Extracts credentials and sensitive files from accessible SMB shares",
+  "version": "1.0.0",
+  "author": "PenDonn",
+  "enabled": true
+}

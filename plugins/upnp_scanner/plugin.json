@@ -1,0 +1,7 @@
+{
+  "name": "UPnP Scanner",
+  "description": "Detects exposed UPnP services that can be exploited for port forwarding",
+  "version": "1.0.0",
+  "author": "PenDonn",
+  "enabled": true
+}

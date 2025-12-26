@@ -8,3 +8,8 @@ RPi.GPIO==0.7.1; platform_machine == "armv7l" or platform_machine == "aarch64"
 spidev==3.6; platform_machine == "armv7l" or platform_machine == "aarch64"
 python-nmap==0.7.1
 paramiko==3.3.1
+
+# New plugin dependencies
+dnspython==2.4.2
+pysnmp==4.4.12
+reportlab==4.0.7

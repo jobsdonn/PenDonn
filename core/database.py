@@ -236,6 +236,15 @@ class Database:
         conn.close()
         return handshakes
     
+    def get_handshakes_for_network(self, bssid: str) -> List[Dict]:
+        """Get all handshakes for a specific network"""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM handshakes WHERE bssid = ?', (bssid,))
+        handshakes = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return handshakes
+    
     def update_handshake_status(self, handshake_id: int, status: str):
         """Update handshake processing status"""
         conn = self.connect()

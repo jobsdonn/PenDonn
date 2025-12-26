@@ -25,7 +25,7 @@ class WiFiMonitor:
         self.db = database
         
         # Auto-detect correct interfaces based on MAC addresses
-        self.management_mac = "dc:a6:32:9e:ea:ba"  # Onboard WiFi MAC
+        self.management_mac = None  # Will be detected from config
         self.single_interface_mode = config['wifi'].get('single_interface_mode', False)
         self.allow_management_wifi = config['wifi'].get('allow_management_wifi', False)
         
@@ -109,7 +109,7 @@ class WiFiMonitor:
                     if len(parts) >= 2:
                         current_interface = parts[1].split('@')[0]  # Get interface name
                 
-                # Line with MAC: "    link/ether dc:a6:32:9e:ea:ba" or "    link/ieee802.11"
+                # Line with MAC: "    link/ether aa:bb:cc:dd:ee:ff" or "    link/ieee802.11"
                 elif ('link/ether' in line or 'link/ieee802.11' in line) and current_interface:
                     # Skip if this is the connected interface (SSH connection)
                     if current_interface == connected_interface:
@@ -200,7 +200,7 @@ class WiFiMonitor:
             
             # Get the MAC address of the onboard WiFi (management interface)
             # This is the WiFi you're SSH'd through - NEVER put it in monitor mode!
-            onboard_mac = "dc:a6:32:9e:ea:ba"  # Your Broadcom onboard WiFi MAC
+            onboard_mac = None  # Detect from system
             
             # Check if monitor interface is the onboard WiFi
             result = subprocess.run(['ip', 'link', 'show', self.monitor_interface],

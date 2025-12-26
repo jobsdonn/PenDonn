@@ -148,10 +148,32 @@ if [ "$UPDATE_WIFI" = "yes" ]; then
     echo "  Monitor:    $MON_IFACE"
     echo "  Attack:     $ATK_IFACE"
     
-    # Update config
-    sed -i "s/\"management_interface\": \".*\"/\"management_interface\": \"$MGMT_IFACE\"/g" "$CONFIG_FILE"
-    sed -i "s/\"monitor_interface\": \".*\"/\"monitor_interface\": \"$MON_IFACE\"/g" "$CONFIG_FILE"
-    sed -i "s/\"attack_interface\": \".*\"/\"attack_interface\": \"$ATK_IFACE\"/g" "$CONFIG_FILE"
+    # Get MAC addresses for persistent identification
+    MGMT_MAC=$(cat /sys/class/net/$MGMT_IFACE/address 2>/dev/null || echo "unknown")
+    MON_MAC=$(cat /sys/class/net/$MON_IFACE/address 2>/dev/null || echo "unknown")
+    ATK_MAC=$(cat /sys/class/net/$ATK_IFACE/address 2>/dev/null || echo "unknown")
+    
+    echo ""
+    echo -e "${GREEN}MAC addresses (for persistent identification):${NC}"
+    echo "  Management: $MGMT_MAC"
+    echo "  Monitor:    $MON_MAC"
+    echo "  Attack:     $ATK_MAC"
+    
+    # Update config with Python for proper JSON handling
+    python3 -c "
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+config['wifi']['management_interface'] = '$MGMT_IFACE'
+config['wifi']['monitor_interface'] = '$MON_IFACE'
+config['wifi']['attack_interface'] = '$ATK_IFACE'
+config['wifi']['management_mac'] = '$MGMT_MAC'
+config['wifi']['monitor_mac'] = '$MON_MAC'
+config['wifi']['attack_mac'] = '$ATK_MAC'
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+print('Config updated: WiFi interfaces and MAC addresses configured')
+"
 fi
 
 echo ""
@@ -229,21 +251,33 @@ echo -e "${BLUE}═════════════════════�
 echo ""
 
 # 4. Cracking Configuration
-echo -e "${BLUE}[4/6] Password Cracking Configuration${NC}"
+echo -e "${BLUE}[4/8] Password Cracking Configuration${NC}"
 echo ""
 
+CURRENT_CRACK_ENABLED=$(grep -A 5 '"cracking"' "$CONFIG_FILE" | grep '"enabled"' | grep -o 'true\|false' | head -1)
 CURRENT_AUTO_CRACK=$(grep -A 5 '"cracking"' "$CONFIG_FILE" | grep '"auto_start_cracking"' | grep -o 'true\|false')
+echo -e "${YELLOW}Cracking enabled:${NC} $CURRENT_CRACK_ENABLED"
 echo -e "${YELLOW}Auto-start cracking:${NC} $CURRENT_AUTO_CRACK"
 
-read -p "Enable auto-cracking after handshake capture? (yes/no) [$CURRENT_AUTO_CRACK]: " AUTO_CRACK
-AUTO_CRACK=${AUTO_CRACK:-$CURRENT_AUTO_CRACK}
+read -p "Enable password cracking? (yes/no) [$CURRENT_CRACK_ENABLED]: " CRACK_ENABLED
+CRACK_ENABLED=${CRACK_ENABLED:-$CURRENT_CRACK_ENABLED}
 
-if [ "$AUTO_CRACK" = "yes" ] || [ "$AUTO_CRACK" = "true" ]; then
-    sed -i 's/"auto_start_cracking": false/"auto_start_cracking": true/g' "$CONFIG_FILE"
-    echo -e "${GREEN}✓ Auto-cracking enabled${NC}"
+if [ "$CRACK_ENABLED" = "yes" ] || [ "$CRACK_ENABLED" = "true" ]; then
+    sed -i '/"cracking":/,/"enabled":/{s/"enabled": false/"enabled": true/}' "$CONFIG_FILE"
+    
+    read -p "Enable auto-cracking after handshake capture? (yes/no) [$CURRENT_AUTO_CRACK]: " AUTO_CRACK
+    AUTO_CRACK=${AUTO_CRACK:-$CURRENT_AUTO_CRACK}
+    
+    if [ "$AUTO_CRACK" = "yes" ] || [ "$AUTO_CRACK" = "true" ]; then
+        sed -i 's/"auto_start_cracking": false/"auto_start_cracking": true/g' "$CONFIG_FILE"
+        echo -e "${GREEN}✓ Auto-cracking enabled${NC}"
+    else
+        sed -i 's/"auto_start_cracking": true/"auto_start_cracking": false/g' "$CONFIG_FILE"
+        echo -e "${YELLOW}! Auto-cracking disabled${NC}"
+    fi
 else
-    sed -i 's/"auto_start_cracking": true/"auto_start_cracking": false/g' "$CONFIG_FILE"
-    echo -e "${YELLOW}! Auto-cracking disabled${NC}"
+    sed -i '/"cracking":/,/"enabled":/{s/"enabled": true/"enabled": false/}' "$CONFIG_FILE"
+    echo -e "${YELLOW}! Cracking disabled${NC}"
 fi
 
 echo ""
@@ -251,29 +285,63 @@ echo -e "${BLUE}═════════════════════�
 echo ""
 
 # 5. Network Enumeration Configuration
-echo -e "${BLUE}[5/6] Network Enumeration Configuration${NC}"
+echo -e "${BLUE}[5/8] Network Enumeration Configuration${NC}"
 echo ""
 
+CURRENT_ENUM_ENABLED=$(grep -A 3 '"enumeration"' "$CONFIG_FILE" | grep '"enabled"' | grep -o 'true\|false' | head -1)
 CURRENT_AUTO_SCAN=$(grep -A 3 '"enumeration"' "$CONFIG_FILE" | grep '"auto_scan_on_crack"' | grep -o 'true\|false')
+echo -e "${YELLOW}Enumeration enabled:${NC} $CURRENT_ENUM_ENABLED"
 echo -e "${YELLOW}Auto-scan after password crack:${NC} $CURRENT_AUTO_SCAN"
 
-read -p "Enable auto-scan after successful crack? (yes/no) [$CURRENT_AUTO_SCAN]: " AUTO_SCAN
-AUTO_SCAN=${AUTO_SCAN:-$CURRENT_AUTO_SCAN}
+read -p "Enable network enumeration? (yes/no) [$CURRENT_ENUM_ENABLED]: " ENUM_ENABLED
+ENUM_ENABLED=${ENUM_ENABLED:-$CURRENT_ENUM_ENABLED}
 
-if [ "$AUTO_SCAN" = "yes" ] || [ "$AUTO_SCAN" = "true" ]; then
-    sed -i 's/"auto_scan_on_crack": false/"auto_scan_on_crack": true/g' "$CONFIG_FILE"
-    echo -e "${GREEN}✓ Auto-scan enabled${NC}"
+if [ "$ENUM_ENABLED" = "yes" ] || [ "$ENUM_ENABLED" = "true" ]; then
+    sed -i '/"enumeration":/,/"enabled":/{s/"enabled": false/"enabled": true/}' "$CONFIG_FILE"
+    
+    read -p "Enable auto-scan after successful crack? (yes/no) [$CURRENT_AUTO_SCAN]: " AUTO_SCAN
+    AUTO_SCAN=${AUTO_SCAN:-$CURRENT_AUTO_SCAN}
+    
+    if [ "$AUTO_SCAN" = "yes" ] || [ "$AUTO_SCAN" = "true" ]; then
+        sed -i 's/"auto_scan_on_crack": false/"auto_scan_on_crack": true/g' "$CONFIG_FILE"
+        echo -e "${GREEN}✓ Auto-scan enabled${NC}"
+    else
+        sed -i 's/"auto_scan_on_crack": true/"auto_scan_on_crack": false/g' "$CONFIG_FILE"
+        echo -e "${YELLOW}! Auto-scan disabled${NC}"
+    fi
 else
-    sed -i 's/"auto_scan_on_crack": true/"auto_scan_on_crack": false/g' "$CONFIG_FILE"
-    echo -e "${YELLOW}! Auto-scan disabled${NC}"
+    sed -i '/"enumeration":/,/"enabled":/{s/"enabled": true/"enabled": false/}' "$CONFIG_FILE"
+    echo -e "${YELLOW}! Enumeration disabled${NC}"
 fi
 
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 
-# 6. Display Configuration
-echo -e "${BLUE}[6/6] Display Configuration${NC}"
+# 6. Plugins Configuration
+echo -e "${BLUE}[6/8] Vulnerability Plugins Configuration${NC}"
+echo ""
+
+CURRENT_PLUGINS_ENABLED=$(grep -A 3 '"plugins"' "$CONFIG_FILE" | grep '"enabled"' | grep -o 'true\|false' | head -1)
+echo -e "${YELLOW}Plugins enabled:${NC} $CURRENT_PLUGINS_ENABLED"
+
+read -p "Enable vulnerability scanning plugins? (yes/no) [$CURRENT_PLUGINS_ENABLED]: " PLUGINS_ENABLED
+PLUGINS_ENABLED=${PLUGINS_ENABLED:-$CURRENT_PLUGINS_ENABLED}
+
+if [ "$PLUGINS_ENABLED" = "yes" ] || [ "$PLUGINS_ENABLED" = "true" ]; then
+    sed -i '/"plugins":/,/"enabled":/{s/"enabled": false/"enabled": true/}' "$CONFIG_FILE"
+    echo -e "${GREEN}✓ Plugins enabled${NC}"
+else
+    sed -i '/"plugins":/,/"enabled":/{s/"enabled": true/"enabled": false/}' "$CONFIG_FILE"
+    echo -e "${YELLOW}! Plugins disabled${NC}"
+fi
+
+echo ""
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo ""
+
+# 7. Display Configuration
+echo -e "${BLUE}[7/8] Display Configuration${NC}"
 echo ""
 
 CURRENT_DISPLAY=$(grep -A 4 '"display"' "$CONFIG_FILE" | grep '"enabled"' | grep -o 'true\|false' | head -1)
@@ -283,8 +351,19 @@ read -p "Do you have a Waveshare display? (yes/no) [$CURRENT_DISPLAY]: " HAS_DIS
 HAS_DISPLAY=${HAS_DISPLAY:-$CURRENT_DISPLAY}
 
 if [ "$HAS_DISPLAY" = "yes" ] || [ "$HAS_DISPLAY" = "true" ]; then
-    # Find and replace only the display enabled setting
-    sed -i '/"display"/,/}/s/"enabled": false/"enabled": true/' "$CONFIG_FILE"
+    sed -i '/"display":/,/"enabled":/{s/"enabled": false/"enabled": true/}' "$CONFIG_FILE"
+    echo -e "${GREEN}✓ Display enabled${NC}"
+else
+    sed -i '/"display":/,/"enabled":/{s/"enabled": true/"enabled": false/}' "$CONFIG_FILE"
+    echo -e "${YELLOW}! Display disabled${NC}"
+fi
+
+echo ""
+echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo ""
+
+# 8. Service Management
+echo -e "${BLUE}[8/8] Service Management${NC}"
     echo -e "${GREEN}✓ Display enabled${NC}"
 else
     sed -i '/"display"/,/}/s/"enabled": true/"enabled": false/' "$CONFIG_FILE"
@@ -311,8 +390,11 @@ if [ -n "$MGMT_IFACE" ]; then
 fi
 echo ""
 echo "  Web Interface: http://$(hostname -I | awk '{print $1}'):${NEW_PORT:-$CURRENT_PORT}"
+echo "  Cracking: ${CRACK_ENABLED:-$CURRENT_CRACK_ENABLED}"
 echo "  Auto-cracking: ${AUTO_CRACK:-$CURRENT_AUTO_CRACK}"
+echo "  Enumeration: ${ENUM_ENABLED:-$CURRENT_ENUM_ENABLED}"
 echo "  Auto-scanning: ${AUTO_SCAN:-$CURRENT_AUTO_SCAN}"
+echo "  Plugins: ${PLUGINS_ENABLED:-$CURRENT_PLUGINS_ENABLED}"
 echo "  Display: ${HAS_DISPLAY:-$CURRENT_DISPLAY}"
 echo ""
 

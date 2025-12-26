@@ -139,6 +139,8 @@ apt-get install -y \
     sqlite3 \
     hostapd \
     dnsmasq \
+    bluez \
+    bluez-tools \
     nginx \
     build-essential \
     dkms \
@@ -164,6 +166,8 @@ apt-get install -y \
             sqlite3 \
             hostapd \
             dnsmasq \
+            bluez \
+            bluez-tools \
             nginx \
             build-essential \
             dkms \
@@ -919,7 +923,7 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
         echo -e "${YELLOW}Available interfaces:${NC}"
         
         # Get MAC addresses and detect onboard WiFi
-        ONBOARD_MAC="dc:a6:32:9e:ea:ba"
+        ONBOARD_MAC=""  # Detect from system
         for i in "${!INTERFACES[@]}"; do
             IFACE="${INTERFACES[$i]}"
             MAC=$(ip link show "$IFACE" 2>/dev/null | grep -oP '(?<=link/ether )[0-9a-f:]+' || echo "unknown")
@@ -1010,26 +1014,63 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     echo ""
     
     # Cracking Configuration
-    echo -e "${BLUE}[4/5] Password Cracking Configuration${NC}"
-    read -p "Enable auto-cracking after handshake capture? (yes/no) [yes]: " AUTO_CRACK
-    AUTO_CRACK=${AUTO_CRACK:-yes}
-    if [ "$AUTO_CRACK" = "no" ]; then
-        sed -i "s/\"auto_start_cracking\": true/\"auto_start_cracking\": false/g" "$CONFIG_FILE"
-        echo -e "${YELLOW}Auto-cracking disabled${NC}"
+    echo -e "${BLUE}[4/7] Password Cracking Configuration${NC}"
+    read -p "Enable password cracking? (yes/no) [yes]: " ENABLE_CRACK
+    ENABLE_CRACK=${ENABLE_CRACK:-yes}
+    if [ "$ENABLE_CRACK" = "no" ]; then
+        sed -i '/"cracking":/,/"enabled":/{s/"enabled": true/"enabled": false/}' "$CONFIG_FILE"
+        echo -e "${YELLOW}Cracking disabled${NC}"
     else
-        echo -e "${GREEN}Auto-cracking enabled${NC}"
+        sed -i '/"cracking":/,/"enabled":/{s/"enabled": false/"enabled": true/}' "$CONFIG_FILE"
+        read -p "Enable auto-cracking after handshake capture? (yes/no) [yes]: " AUTO_CRACK
+        AUTO_CRACK=${AUTO_CRACK:-yes}
+        if [ "$AUTO_CRACK" = "no" ]; then
+            sed -i "s/\"auto_start_cracking\": true/\"auto_start_cracking\": false/g" "$CONFIG_FILE"
+            echo -e "${YELLOW}Auto-cracking disabled${NC}"
+        else
+            echo -e "${GREEN}Auto-cracking enabled${NC}"
+        fi
+    fi
+    
+    echo ""
+    
+    # Enumeration Configuration
+    echo -e "${BLUE}[5/7] Network Enumeration Configuration${NC}"
+    read -p "Enable network enumeration after cracking? (yes/no) [yes]: " ENABLE_ENUM
+    ENABLE_ENUM=${ENABLE_ENUM:-yes}
+    if [ "$ENABLE_ENUM" = "no" ]; then
+        sed -i '/"enumeration":/,/"enabled":/{s/"enabled": true/"enabled": false/}' "$CONFIG_FILE"
+        echo -e "${YELLOW}Enumeration disabled${NC}"
+    else
+        sed -i '/"enumeration":/,/"enabled":/{s/"enabled": false/"enabled": true/}' "$CONFIG_FILE"
+        echo -e "${GREEN}Enumeration enabled${NC}"
+    fi
+    
+    echo ""
+    
+    # Plugins Configuration
+    echo -e "${BLUE}[6/7] Vulnerability Plugins Configuration${NC}"
+    read -p "Enable vulnerability scanning plugins? (yes/no) [yes]: " ENABLE_PLUGINS
+    ENABLE_PLUGINS=${ENABLE_PLUGINS:-yes}
+    if [ "$ENABLE_PLUGINS" = "no" ]; then
+        sed -i '/"plugins":/,/"enabled":/{s/"enabled": true/"enabled": false/}' "$CONFIG_FILE"
+        echo -e "${YELLOW}Plugins disabled${NC}"
+    else
+        sed -i '/"plugins":/,/"enabled":/{s/"enabled": false/"enabled": true/}' "$CONFIG_FILE"
+        echo -e "${GREEN}Plugins enabled${NC}"
     fi
     
     echo ""
     
     # Display Configuration
-    echo -e "${BLUE}[5/5] Display Configuration${NC}"
+    echo -e "${BLUE}[7/7] Display Configuration${NC}"
     read -p "Do you have a Waveshare display connected? (yes/no) [no]: " HAS_DISPLAY
     HAS_DISPLAY=${HAS_DISPLAY:-no}
     if [ "$HAS_DISPLAY" = "no" ]; then
-        sed -i "s/\"enabled\": true/\"enabled\": false/g" "$CONFIG_FILE"
+        sed -i '/"display":/,/"enabled":/{s/"enabled": true/"enabled": false/}' "$CONFIG_FILE"
         echo -e "${YELLOW}Display disabled (headless mode)${NC}"
     else
+        sed -i '/"display":/,/"enabled":/{s/"enabled": false/"enabled": true/}' "$CONFIG_FILE"
         echo -e "${GREEN}Display enabled${NC}"
     fi
     
@@ -1055,7 +1096,10 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     else
         echo "  Whitelisted SSIDs: None"
     fi
-    echo "  Auto-cracking: $AUTO_CRACK"
+    echo "  Cracking: $ENABLE_CRACK"
+    echo "  Auto-cracking: ${AUTO_CRACK:-disabled}"
+    echo "  Enumeration: $ENABLE_ENUM"
+    echo "  Plugins: $ENABLE_PLUGINS"
     echo "  Display: $HAS_DISPLAY"
     echo ""
     

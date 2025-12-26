@@ -1,0 +1,7 @@
+{
+  "name": "VPN Credential Stealer",
+  "description": "Extracts VPN configurations and detects VPN portals",
+  "version": "1.0.0",
+  "author": "PenDonn",
+  "enabled": true
+}

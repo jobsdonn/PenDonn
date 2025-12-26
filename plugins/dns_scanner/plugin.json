@@ -1,0 +1,7 @@
+{
+  "name": "DNS Vulnerability Scanner",
+  "description": "Checks for DNS zone transfers, open recursion, and misconfigurations",
+  "version": "1.0.0",
+  "author": "PenDonn",
+  "enabled": true
+}

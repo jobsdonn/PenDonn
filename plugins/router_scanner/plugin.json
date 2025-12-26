@@ -1,0 +1,7 @@
+{
+  "name": "Router & IoT Device Scanner",
+  "description": "Tests default credentials on routers, cameras, and IoT devices",
+  "version": "1.0.0",
+  "author": "PenDonn",
+  "enabled": true
+}

@@ -16,6 +16,7 @@ from flask_cors import CORS
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.database import Database
+from core.pdf_report import PDFReport
 
 # Configure logging
 logging.basicConfig(
@@ -229,6 +230,59 @@ def export_data():
     except Exception as e:
         logger.error(f"Export error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/export/pdf', methods=['GET'])
+def export_pdf():
+    """Export scan report as PDF"""
+    try:
+        scan_id = request.args.get('scan_id')
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Set output path
+        pdf_path = f"/tmp/pendonn_report_{timestamp}.pdf"
+        
+        logger.info(f"Starting PDF generation: {pdf_path}")
+        
+        # Generate PDF report
+        report = PDFReport(db, output_path=pdf_path)
+        
+        logger.info("PDFReport object created")
+        
+        if scan_id:
+            # Export specific scan - include only that scan's data
+            # For now, generate full report (can be enhanced later to filter by scan_id)
+            logger.info(f"Generating report for scan_id: {scan_id}")
+            report.generate_report(include_sections=[
+                'summary', 'scans', 'vulnerabilities', 'recommendations'
+            ])
+            filename = f"pendonn_scan_{scan_id}_{timestamp}.pdf"
+        else:
+            # Export full report (all scans and vulnerabilities)
+            logger.info("Generating full report")
+            report.generate_report()
+            filename = f"pendonn_report_{timestamp}.pdf"
+        
+        logger.info(f"PDF generated successfully: {pdf_path}")
+        
+        return send_file(
+            pdf_path,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/pdf'
+        )
+    except Exception as e:
+        logger.error(f"PDF export error: {e}")
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"Full traceback:\n{error_details}")
+        
+        # Write to separate error file for debugging
+        with open('/tmp/pdf_error.log', 'w') as f:
+            f.write(f"Error: {e}\n\n")
+            f.write(error_details)
+        
+        return jsonify({'success': False, 'error': str(e), 'details': error_details}), 500
 
 
 @app.route('/api/database/reset', methods=['POST'])

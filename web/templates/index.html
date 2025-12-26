@@ -430,7 +430,12 @@
         </div>
 
         <div id="scans-panel" class="content-panel">
-            <h2>Network Scans</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0;">Network Scans</h2>
+                <button class="btn" onclick="exportPDFReport()" style="background: #e74c3c; color: white;">
+                    📄 Export PDF Report
+                </button>
+            </div>
             <div id="scans-content" class="loading">Loading...</div>
         </div>
 
@@ -949,6 +954,67 @@
                 detailsRow.style.display = 'none';
                 icon.textContent = '▶';
                 expandedScans.delete(id);  // Remember this is collapsed
+            }
+        }
+
+        async function exportPDFReport(scanId = null) {
+            try {
+                // Show loading indicator
+                const btn = event.target;
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '⏳ Generating PDF...';
+                btn.disabled = true;
+
+                // Build URL with scan_id parameter if provided
+                let url = '/api/export/pdf';
+                if (scanId) {
+                    url += `?scan_id=${scanId}`;
+                }
+
+                // Fetch the PDF
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error('Failed to generate PDF report');
+                }
+
+                // Get the PDF blob
+                const blob = await response.blob();
+                
+                // Create a download link
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = downloadUrl;
+                
+                // Extract filename from response headers or use default
+                const contentDisposition = response.headers.get('content-disposition');
+                const filename = contentDisposition 
+                    ? contentDisposition.split('filename=')[1].replace(/"/g, '')
+                    : `pendonn_report_${new Date().getTime()}.pdf`;
+                
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                
+                // Cleanup
+                window.URL.revokeObjectURL(downloadUrl);
+                document.body.removeChild(a);
+                
+                // Reset button
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                
+                showNotification('PDF report downloaded successfully', 'success');
+            } catch (error) {
+                console.error('PDF export error:', error);
+                showNotification('Failed to export PDF report', 'error');
+                
+                // Reset button on error
+                if (event && event.target) {
+                    event.target.innerHTML = '📄 Export PDF Report';
+                    event.target.disabled = false;
+                }
             }
         }
 

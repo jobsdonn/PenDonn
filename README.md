@@ -1,6 +1,6 @@
 # PenDonn - Automated Penetration Testing System
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 ![Python](https://img.shields.io/badge/python-3.9+-green)
 ![License](https://img.shields.io/badge/license-Educational-red)
 
@@ -33,17 +33,23 @@ By downloading, installing, or using this software, you agree that:
 - 🤝 **Handshake Capture** - Captures WPA/WPA2 handshakes using deauthentication
 - 🔓 **Password Cracking** - Automated cracking with John the Ripper and Hashcat
 - 🔍 **Network Enumeration** - Comprehensive network scanning with Nmap
-- 🔌 **Plugin System** - Dynamic plugin architecture for custom vulnerability scanners
+- 🔌 **Plugin System** - Dynamic plugin architecture with 12 built-in vulnerability scanners
+- 👿 **Evil Twin Attacks** - Rogue AP with captive portal for credential harvesting
+- 📘 **Bluetooth Scanning** - Device discovery and service enumeration
 - 🌐 **Web Interface** - Full-featured web dashboard for monitoring and control
 - 📊 **Display Output** - Real-time status on Waveshare V4 display
-- 💾 **Data Export** - Export all results to JSON with database backup
+- 💾 **Data Export** - Export to JSON and professional PDF reports with detailed findings
 
 ### Advanced Features
 - 📋 **Whitelist System** - Protect your own networks from scanning
 - 🔄 **Auto-Start** - Runs on boot via systemd services
 - 📈 **Statistics Tracking** - Comprehensive metrics and logging
 - 🗃️ **SQLite Database** - Stores all networks, handshakes, passwords, and vulnerabilities
-- 🔌 **3 Built-in Plugins** - SMB, Web, and SSH vulnerability scanners included
+- 🔌 **12 Built-in Plugins** - DNS, FTP, Router/IoT, SMB, SSH, Web, VPN/SMB credential stealers, UPnP, SNMP, Bluetooth
+- 🔧 **MAC-Based Interface Detection** - Stable interface identification across reboots
+- 📄 **PDF Report Generation** - Professional reports with detailed host findings, port scans, CVE information
+- 🔒 **Safe Enumeration** - Automatic adapter coordination prevents SSH disconnection during scans
+- 📊 **Detailed Scan Reports** - Host discovery with service detection, version identification, and vulnerability mapping
 
 ---
 
@@ -57,6 +63,11 @@ By downloading, installing, or using this software, you agree that:
 - **Waveshare V4 Display** (optional but recommended)
 - **MicroSD Card** (32GB+ recommended)
 - **Power Supply** (Official RPi power supply recommended)
+
+### Optional Hardware
+- **Bluetooth Adapter** (for Bluetooth enumeration plugin)
+  - Built-in RPi Bluetooth or external USB adapter
+  - Required for Bluetooth device scanning
 
 ### Recommended Accessories
 - Cooling fan or heatsinks for Raspberry Pi
@@ -224,12 +235,70 @@ sudo journalctl -u pendonn-web -f
 cd /opt/pendonn
 sudo python3 main.py
 
-# Export data
+# Export data to JSON
 curl -X POST http://localhost:8080/api/export --output export.json
+
+# Generate PDF report
+curl -X POST http://localhost:8080/api/report/pdf --output report.pdf
 
 # Check statistics
 curl http://localhost:8080/api/status | jq
 ```
+
+### Evil Twin Attacks
+
+```python
+# Via Python API
+from core.evil_twin import EvilTwin
+from core.database import Database
+
+db = Database()
+evil_twin = EvilTwin(config, db)
+
+# Start attack
+evil_twin.start_attack(
+    ssid="TargetNetwork",
+    bssid="AA:BB:CC:DD:EE:FF",
+    channel=6,
+    attack_interface="wlan1",
+    internet_interface="eth0"  # Optional: provide internet access
+)
+
+# Stop attack
+evil_twin.stop_attack()
+```
+
+### PDF Report Generation
+
+**Export comprehensive PDF reports via web interface or API:**
+
+```bash
+# Via web interface
+# Click "📄 Export PDF Report" button in the web dashboard
+
+# Via API
+curl http://localhost:8080/api/export/pdf --output pendonn_report.pdf
+
+# Programmatically
+from core.pdf_report import PDFReport
+from core.database import Database
+
+db = Database()
+report = PDFReport(db, "./my_report.pdf")
+report.generate_report()
+```
+
+**PDF Report Contents:**
+- Executive summary with statistics
+- Discovered networks and signal strength
+- Captured handshakes and status
+- Cracked passwords (highlighted)
+- Network enumeration scans with:
+  - Host discovery details (IP, hostname, OS)
+  - Open ports with service identification
+  - Product versions and vulnerabilities
+- Vulnerability findings by severity (Critical/High/Medium/Low)
+- Security recommendations
 
 ---
 
@@ -313,6 +382,23 @@ curl http://localhost:8080/api/status | jq
    sudo systemctl restart pendonn
    ```
 
+### Built-in Plugins
+
+PenDonn includes 12 comprehensive vulnerability scanning plugins:
+
+1. **DNS Scanner** - Zone transfer detection, open recursion checks
+2. **FTP Scanner** - Anonymous access, weak credential testing
+3. **Router/IoT Scanner** - 30+ default credentials for routers, cameras, printers
+4. **SMB Scanner** - Share enumeration, null session detection
+5. **SMB Credential Stealer** - Extracts passwords, SSH keys, VPN configs from shares
+6. **VPN Credential Stealer** - VPN config extraction, portal detection
+7. **Web Scanner** - Directory listing, missing headers, outdated software
+8. **SSH Scanner** - Weak configuration, outdated versions
+9. **UPnP Scanner** - SSDP discovery, exposed services
+10. **SNMP Scanner** - Community string testing, information disclosure
+11. **Bluetooth Scanner** - Device discovery, service enumeration
+12. **Database Scanner** - MySQL, PostgreSQL weak passwords (planned)
+
 ### Plugin API Reference
 
 **Available Methods:**
@@ -340,24 +426,39 @@ pendonn/
 │   ├── cracker.py               # Password cracking engine
 │   ├── enumerator.py            # Network enumeration
 │   ├── plugin_manager.py        # Plugin system
+│   ├── interface_manager.py     # MAC-based interface detection
+│   ├── evil_twin.py             # Evil Twin attack module
+│   ├── pdf_report.py            # PDF report generator
 │   └── display.py               # Waveshare display
 ├── web/
 │   ├── app.py                   # Flask web server
 │   └── templates/
-│       └── index.html           # Web dashboard
+│       ├── index.html           # Web dashboard
+│       └── captive_portal.html  # Evil Twin captive portal
 ├── plugins/
+│   ├── dns_scanner/             # DNS vulnerability scanner
+│   ├── ftp_scanner/             # FTP security scanner
+│   ├── router_scanner/          # Router/IoT default credentials
 │   ├── smb_scanner/             # SMB vulnerability scanner
+│   ├── smb_cred_stealer/        # SMB credential extraction
+│   ├── vpn_cred_stealer/        # VPN credential extraction
 │   ├── web_scanner/             # Web vulnerability scanner
-│   └── ssh_scanner/             # SSH security scanner
+│   ├── ssh_scanner/             # SSH security scanner
+│   ├── upnp_scanner/            # UPnP device scanner
+│   ├── snmp_scanner/            # SNMP security scanner
+│   └── bluetooth_scanner/       # Bluetooth device enumeration
 ├── data/
 │   └── pendonn.db               # SQLite database
 ├── logs/
 │   ├── pendonn.log              # Main daemon log
 │   └── web.log                  # Web interface log
 ├── handshakes/                  # Captured handshake files
+├── scripts/
+│   ├── install.sh               # Installation script
+│   └── configure.sh             # Configuration wizard
 ├── main.py                      # Main daemon
 ├── requirements.txt             # Python dependencies
-├── install.sh                   # Installation script
+├── generate_sample_report.py    # PDF report demo
 └── README.md                    # This file
 ```
 
@@ -405,6 +506,15 @@ pendonn/
     "enabled": true,
     "directory": "./plugins",
     "auto_load": true
+  },
+  "evil_twin": {
+    "enabled": false,
+    "provide_internet": false,
+    "captive_portal": true
+  },
+  "bluetooth": {
+    "enabled": true,
+    "scan_duration": 10
   },
   "database": {
     "path": "./data/pendonn.db",
@@ -500,28 +610,65 @@ curl http://localhost:8080/api/status
 sudo netstat -tlnp | grep 8080
 ```
 
+### Bluetooth Scanner Not Working
+
+```bash
+# Check if Bluetooth is available
+hciconfig
+
+# Enable Bluetooth adapter
+sudo hciconfig hci0 up
+
+# Test Bluetooth scanning
+sudo hcitool scan
+
+# Install missing tools
+sudo apt-get install bluez bluez-tools
+```
+
+### PDF Generation Fails
+
+```bash
+# Install reportlab
+pip install reportlab
+
+# Test PDF generation
+python generate_sample_report.py
+```
+
 ---
 
 ## 📊 Database Schema
 
 The SQLite database stores:
 
-- **Networks** - Discovered WiFi networks
-- **Handshakes** - Captured WPA/WPA2 handshakes
-- **Cracked Passwords** - Successfully cracked passwords
-- **Scans** - Network enumeration scans
-- **Vulnerabilities** - Discovered security issues
-- **System Logs** - System activity logs
+- **Networks** - Discovered WiFi networks (SSID, BSSID, encryption, channel)
+- **Handshakes** - Captured WPA/WPA2 handshakes with timestamps
+- **Cracked Passwords** - Successfully cracked passwords with methods
+- **Scans** - Network enumeration scans with host counts
+- **Vulnerabilities** - Security issues with severity ratings (critical/high/medium/low)
+- **Bluetooth Devices** - Discovered Bluetooth devices and services
+- **Evil Twin Sessions** - Captured credentials from Evil Twin attacks
+- **System Logs** - System activity logs with levels
 
 ### Export Data
 
 ```bash
-# Via web interface
+# Export to JSON
 curl -X POST http://localhost:8080/api/export > export.json
 
-# Via Python
+# Export to PDF report
+curl -X POST http://localhost:8080/api/report/pdf > pendonn_report.pdf
+
+# Via Python - JSON
 cd /opt/pendonn
 sudo python3 -c "from core.database import Database; db = Database('./data/pendonn.db'); db.export_data('./export.json')"
+
+# Via Python - PDF
+sudo python3 -c "from core.pdf_report import generate_pdf_report; from core.database import Database; db = Database('./data/pendonn.db'); generate_pdf_report(db, './report.pdf')"
+
+# Generate sample PDF (demo with mock data)
+python generate_sample_report.py
 ```
 
 ---
@@ -556,7 +703,40 @@ Inspired by:
 
 ---
 
-## 📞 Support
+## � Changelog
+
+### Version 1.1.0 (2025-12-26)
+
+**New Features:**
+- ✨ PDF report generation with detailed findings
+  - Host discovery with IP, hostname, OS detection
+  - Port scans with service and version identification
+  - Vulnerability details with CVE information
+  - Professional table layouts and formatting
+- 🔒 Safe enumeration system - prevents SSH disconnection
+  - Automatic WiFi adapter coordination
+  - Uses dedicated adapter for network scanning
+  - Preserves management interface connectivity
+
+**Improvements:**
+- 📊 Enhanced scan reports with complete host details
+- 🎨 Improved PDF formatting with color-coded tables
+- 🔧 MAC-based interface detection for stability
+- 📈 Better statistics tracking and display
+- 🛡️ Robust error handling in enumeration
+
+**Bug Fixes:**
+- Fixed DHCP timeout issues during enumeration
+- Fixed interface name swapping on reboot
+- Fixed PDF generation database method calls
+- Improved monitor mode restoration reliability
+
+### Version 1.0.0 (2025-12)
+- Initial release with core features
+
+---
+
+## �📞 Support
 
 - **Issues:** [GitHub Issues](https://github.com/yourusername/pendonn/issues)
 - **Documentation:** This README
@@ -566,9 +746,9 @@ Inspired by:
 
 ## 🔮 Future Enhancements
 
-- [ ] Evil Twin attack support
-- [ ] Bluetooth enumeration
-- [ ] Advanced reporting with PDF export
+- [x] Evil Twin attack support - **IMPLEMENTED**
+- [x] Bluetooth enumeration - **IMPLEMENTED**
+- [x] Advanced reporting with PDF export - **IMPLEMENTED**
 - [ ] Mobile app for remote control
 - [ ] Multi-language support
 - [ ] Cloud backup integration
@@ -579,18 +759,22 @@ Inspired by:
 ## ⚡ Quick Reference
 
 ```bash
-# Start/Stop
+# Start/Stop Services
 sudo systemctl start pendonn pendonn-web
 sudo systemctl stop pendonn pendonn-web
 
-# Logs
+# View Logs
 sudo journalctl -u pendonn -f
 
 # Web Interface
 http://<rpi-ip>:8080
 
-# Export Data
+# Export Data (JSON)
 curl -X POST http://localhost:8080/api/export > export.json
+
+# Generate PDF Report
+curl http://localhost:8080/api/export/pdf > report.pdf
+# Or click "📄 Export PDF Report" button in web interface
 
 # Add to Whitelist
 curl -X POST http://localhost:8080/api/whitelist \
@@ -599,6 +783,13 @@ curl -X POST http://localhost:8080/api/whitelist \
 
 # Configuration
 sudo nano /opt/pendonn/config/config.json
+
+# Reconfigure Interfaces (MAC-based)
+sudo /opt/pendonn/scripts/configure.sh
+
+# Check Bluetooth
+hciconfig
+sudo hcitool scan
 ```
 
 ---
