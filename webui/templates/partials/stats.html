@@ -1,0 +1,29 @@
+{# KPI tiles. Designed to live inside <div id="stats"> and be hot-swapped. #}
+{% set tiles = [
+    ('Networks',        stats.networks_discovered,     'M5 12.55a8 8 0 0114 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a4 4 0 016.95 0M12 20h.01', 'sky'),
+    ('Handshakes',      stats.handshakes_captured,     'M9 12l2 2 4-4', 'cyan'),
+    ('Cracked',         stats.passwords_cracked,       'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z', 'amber'),
+    ('Scans',           stats.scans_completed,         'M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z', 'violet'),
+    ('Vulnerabilities', stats.vulnerabilities_found,   'M12 9v3.75m0 3.75h.008v.008H12V16.5zM2.697 19.5h18.606c1.54 0 2.502-1.667 1.732-3L13.732 4.5c-.77-1.333-2.694-1.333-3.464 0L.965 16.5c-.77 1.333.192 3 1.732 3z', 'rose'),
+    ('Critical',        stats.critical_vulnerabilities,'M12 9v3.75m0 3.75h.008v.008H12V16.5zM2.697 19.5h18.606c1.54 0 2.502-1.667 1.732-3L13.732 4.5c-.77-1.333-2.694-1.333-3.464 0L.965 16.5c-.77 1.333.192 3 1.732 3z', 'red'),
+] %}
+<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+    {% for label, value, icon, hue in tiles %}
+    <div class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl p-4 flex flex-col">
+        <div class="flex items-center justify-between">
+            <span class="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ label }}</span>
+            <span class="w-7 h-7 rounded-md grid place-items-center
+                {% if hue == 'sky' %}bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300
+                {% elif hue == 'cyan' %}bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300
+                {% elif hue == 'amber' %}bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300
+                {% elif hue == 'violet' %}bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300
+                {% elif hue == 'rose' %}bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300
+                {% elif hue == 'red' %}bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300
+                {% endif %}">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="{{ icon }}"/></svg>
+            </span>
+        </div>
+        <div class="mt-2 text-2xl font-semibold tracking-tight tabular-nums">{{ value }}</div>
+    </div>
+    {% endfor %}
+</div>

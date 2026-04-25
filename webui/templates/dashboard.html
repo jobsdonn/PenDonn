@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — PenDonn{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    {# KPI tiles. Polled by HTMX every 5s; only this fragment repaints. #}
+    <div id="stats"
+         hx-get="/partials/stats"
+         hx-trigger="every 5s"
+         hx-swap="innerHTML">
+        {% include "partials/stats.html" %}
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section class="lg:col-span-2 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
+            <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700 flex items-center justify-between">
+                <div>
+                    <h2 class="font-semibold">Recent activity</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Last 10 events from the daemon</p>
+                </div>
+                <a href="/logs" class="text-xs text-accent-deep hover:underline">All logs →</a>
+            </header>
+            <div class="p-5 text-sm text-slate-500 dark:text-slate-400">
+                Activity feed lands in batch 3E (logs page). For now, see the <a href="/logs" class="text-accent-deep hover:underline">/logs</a> stream.
+            </div>
+        </section>
+
+        <aside class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
+            <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
+                <h2 class="font-semibold">System</h2>
+            </header>
+            <dl class="px-5 py-4 space-y-3 text-sm">
+                <div class="flex justify-between"><dt class="text-slate-500 dark:text-slate-400">Version</dt><dd class="font-mono">{{ app_version }}</dd></div>
+                <div class="flex justify-between"><dt class="text-slate-500 dark:text-slate-400">Auth</dt>
+                    <dd class="font-mono">{{ "enabled" if auth_enabled else "disabled" }}</dd>
+                </div>
+                <div class="flex justify-between"><dt class="text-slate-500 dark:text-slate-400">User</dt><dd class="font-mono">{{ username }}</dd></div>
+            </dl>
+        </aside>
+    </div>
+</div>
+{% endblock %}

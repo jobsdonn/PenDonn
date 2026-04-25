@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en" class="h-full" x-data="{ dark: localStorage.getItem('pendonn-theme') !== 'light' }" x-bind:class="dark ? 'dark' : ''">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <title>{% block title %}PenDonn{% endblock %}</title>
+
+    <!-- Tailwind via CDN. Pinned major. The Play CDN is fine for an
+         on-device admin UI; if Pi has no internet, swap to a vendored
+         tailwind.min.css later. -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        ink: { 950: '#0b0d12', 900: '#11151c', 800: '#181d27', 700: '#222936', 600: '#2e3645' },
+                        accent: { DEFAULT: '#7dd3fc', deep: '#0ea5e9' },
+                        ok: '#22c55e', warn: '#eab308', danger: '#ef4444', critical: '#f43f5e',
+                    },
+                    fontFamily: {
+                        sans: ['ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Inter', 'sans-serif'],
+                        mono: ['ui-monospace', 'SFMono-Regular', 'JetBrains Mono', 'Consolas', 'monospace'],
+                    },
+                },
+            },
+        }
+    </script>
+
+    <!-- HTMX for server-driven interactivity (no SPA bundle needed). -->
+    <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+    <!-- Alpine for tiny client-side state (dropdowns, modals, theme). -->
+    <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+
+    <style>
+        /* The CDN renders Tailwind asynchronously — hide body briefly to
+           avoid a flash of unstyled content on slow links. */
+        [x-cloak] { display: none !important }
+        html.dark { color-scheme: dark }
+        body { font-feature-settings: 'cv02','cv03','cv04','cv11'; }
+        /* HTMX swap subtle pulse */
+        .htmx-swapping { opacity: .6; transition: opacity 120ms }
+        .htmx-settling { opacity: 1 }
+        /* Subtle scroll bar in dark mode */
+        .dark ::-webkit-scrollbar { width: 10px; height: 10px }
+        .dark ::-webkit-scrollbar-thumb { background: #2e3645; border-radius: 6px }
+        .dark ::-webkit-scrollbar-track { background: transparent }
+    </style>
+</head>
+<body class="h-full bg-slate-50 text-slate-900 dark:bg-ink-950 dark:text-slate-100 font-sans antialiased">
+
+{% if username %}
+<div class="min-h-full flex">
+    <!-- Sidebar -->
+    <aside class="hidden md:flex md:flex-col md:w-60 bg-white dark:bg-ink-900 border-r border-slate-200 dark:border-ink-700">
+        <div class="px-5 py-5 flex items-center gap-2 border-b border-slate-200 dark:border-ink-700">
+            <div class="w-8 h-8 rounded-md bg-gradient-to-br from-accent to-accent-deep grid place-items-center text-ink-950 font-bold">P</div>
+            <div>
+                <div class="font-semibold tracking-tight">PenDonn</div>
+                <div class="text-[10px] uppercase tracking-widest text-slate-500 dark:text-slate-400">v{{ app_version }}</div>
+            </div>
+        </div>
+        <nav class="flex-1 px-2 py-4 space-y-0.5 text-sm">
+            {% set _nav = [
+                ('dashboard', '/',           'Dashboard',       'M3 12l2-2 7-7 7 7 2 2v9a1 1 0 01-1 1h-5v-6H10v6H5a1 1 0 01-1-1z'),
+                ('networks',  '/networks',   'Networks',        'M5 12.55a8 8 0 0114 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a4 4 0 016.95 0M12 20h.01'),
+                ('handshakes','/handshakes', 'Handshakes',      'M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z'),
+                ('passwords', '/passwords',  'Cracked',         'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z'),
+                ('scans',     '/scans',      'Scans',           'M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z'),
+                ('vulns',     '/vulnerabilities', 'Vulnerabilities', 'M12 9v3.75m0 3.75h.008v.008H12V16.5zM2.697 19.5h18.606c1.54 0 2.502-1.667 1.732-3L13.732 4.5c-.77-1.333-2.694-1.333-3.464 0L.965 16.5c-.77 1.333.192 3 1.732 3z'),
+                ('logs',      '/logs',       'Logs',            'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z'),
+                ('settings',  '/settings',   'Settings',        'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z'),
+            ] %}
+            {% for key, href, label, path in _nav %}
+            {% set is_active = active_nav == key %}
+            <a href="{{ href }}" class="group flex items-center gap-3 px-3 py-2 rounded-md transition
+                       {{ 'bg-slate-100 dark:bg-ink-800 text-slate-900 dark:text-white' if is_active else 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-ink-800/60 hover:text-slate-900 dark:hover:text-white' }}">
+                <svg class="w-5 h-5 {{ 'text-accent-deep' if is_active else 'text-slate-400 group-hover:text-slate-500 dark:group-hover:text-slate-300' }}"
+                     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="{{ path }}"/>
+                </svg>
+                {{ label }}
+            </a>
+            {% endfor %}
+        </nav>
+        <div class="px-3 py-4 border-t border-slate-200 dark:border-ink-700 text-xs space-y-2">
+            <div class="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                <span>Theme</span>
+                <button @click="dark = !dark; localStorage.setItem('pendonn-theme', dark ? 'dark' : 'light')"
+                        class="px-2 py-1 rounded bg-slate-100 dark:bg-ink-800 hover:bg-slate-200 dark:hover:bg-ink-700">
+                    <span x-show="dark">Dark</span><span x-show="!dark">Light</span>
+                </button>
+            </div>
+            <div class="flex items-center justify-between text-slate-500 dark:text-slate-400">
+                <span class="truncate" title="{{ username }}">{{ username }}</span>
+                {% if auth_enabled %}
+                <form method="post" action="/logout" class="inline">
+                    <button type="submit" class="px-2 py-1 rounded bg-slate-100 dark:bg-ink-800 hover:bg-slate-200 dark:hover:bg-ink-700">Sign out</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main column -->
+    <div class="flex-1 flex flex-col min-w-0">
+        <!-- Top bar (mobile shows brand, desktop shows page title) -->
+        <header class="bg-white dark:bg-ink-900 border-b border-slate-200 dark:border-ink-700 px-4 sm:px-6 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-2 md:hidden">
+                <div class="w-7 h-7 rounded bg-gradient-to-br from-accent to-accent-deep grid place-items-center text-ink-950 font-bold text-sm">P</div>
+                <span class="font-semibold">PenDonn</span>
+            </div>
+            <h1 class="hidden md:block text-lg font-semibold tracking-tight">{% block page_title %}{% endblock %}</h1>
+            <div class="flex items-center gap-3">
+                <span class="hidden sm:inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                    {% if auth_enabled %}
+                        <span class="w-2 h-2 rounded-full bg-ok"></span> auth on
+                    {% else %}
+                        <span class="w-2 h-2 rounded-full bg-warn"></span> auth off
+                    {% endif %}
+                </span>
+                <button class="md:hidden p-2 rounded hover:bg-slate-100 dark:hover:bg-ink-800"
+                        @click="dark = !dark; localStorage.setItem('pendonn-theme', dark ? 'dark' : 'light')">
+                    <svg x-show="dark" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <svg x-show="!dark" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="flex-1 px-4 sm:px-6 py-6 overflow-auto">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</div>
+{% else %}
+    {# No user — typically the login page renders its own layout. #}
+    {% block anonymous %}{% endblock %}
+{% endif %}
+
+</body>
+</html>

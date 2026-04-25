@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Sign in — PenDonn{% endblock %}
+
+{% block anonymous %}
+<div class="min-h-full grid place-items-center px-4 py-10">
+    <div class="w-full max-w-sm">
+        <div class="text-center mb-6">
+            <div class="mx-auto w-12 h-12 rounded-xl bg-gradient-to-br from-accent to-accent-deep grid place-items-center text-ink-950 font-bold text-xl">P</div>
+            <h1 class="mt-3 text-xl font-semibold">PenDonn</h1>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Authorized pentest console</p>
+        </div>
+
+        <div class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl shadow-sm p-6">
+            {% if not auth_enabled %}
+                <div class="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-md p-3 mb-4">
+                    Authentication is currently <strong>disabled</strong> in config. Anyone with network reach can log in. Set <code class="font-mono">web.basic_auth.enabled=true</code> in <code class="font-mono">config.json.local</code> before exposing this UI.
+                </div>
+            {% endif %}
+
+            {% if error %}
+                <div class="text-sm text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-md p-3 mb-4">
+                    Invalid credentials.
+                </div>
+            {% endif %}
+
+            <form method="post" action="/login" class="space-y-4">
+                <input type="hidden" name="next" value="{{ next }}">
+                <div>
+                    <label for="username" class="block text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1">Username</label>
+                    <input id="username" name="username" type="text" autocomplete="username" autofocus
+                           class="w-full rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent">
+                </div>
+                <div>
+                    <label for="password" class="block text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1">Password</label>
+                    <input id="password" name="password" type="password" autocomplete="current-password"
+                           class="w-full rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent">
+                </div>
+                <button type="submit"
+                        class="w-full py-2 rounded-md bg-accent-deep text-white font-medium hover:bg-sky-600 active:bg-sky-700 transition">
+                    Sign in
+                </button>
+            </form>
+        </div>
+
+        <p class="mt-4 text-center text-xs text-slate-500 dark:text-slate-500">
+            Forgot your password? <code class="font-mono">python web/app.py --hash-password</code> on the device generates a new hash for <code class="font-mono">config.json.local</code>.
+        </p>
+    </div>
+</div>
+{% endblock %}
