@@ -1,0 +1,27 @@
+<div id="whitelist">
+    {% if whitelist %}
+    <ul class="divide-y divide-slate-200 dark:divide-ink-700 border border-slate-200 dark:border-ink-700 rounded-md overflow-hidden">
+        {% for ssid in whitelist %}
+        <li class="flex items-center justify-between px-3 py-2 bg-white dark:bg-ink-900">
+            <span class="font-mono text-sm">{{ ssid }}</span>
+            <form hx-post="/partials/whitelist/remove"
+                  hx-target="#whitelist"
+                  hx-swap="outerHTML"
+                  hx-confirm="Remove {{ ssid }} from whitelist?"
+                  class="inline">
+                <input type="hidden" name="ssid" value="{{ ssid }}">
+                <button type="submit"
+                        class="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-ink-800 hover:bg-rose-100 hover:text-rose-700 dark:hover:bg-rose-950 dark:hover:text-rose-300 text-slate-600 dark:text-slate-400">
+                    Remove
+                </button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-slate-500 dark:text-slate-400 italic">
+        No SSIDs whitelisted. The scanner will target every discovered network.
+        Add at least your own networks before starting the daemon.
+    </p>
+    {% endif %}
+</div>

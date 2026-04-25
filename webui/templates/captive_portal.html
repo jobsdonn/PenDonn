@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0ea5e9">
+    <title>Sign in to {{ ssid }}</title>
+    <style>
+        :root { color-scheme: light }
+        * { box-sizing: border-box; margin: 0; padding: 0 }
+        html, body { height: 100% }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(180deg, #f8fafc 0%, #e0f2fe 100%);
+            color: #0f172a;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+            min-height: 100vh;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 8px 28px rgba(2, 6, 23, .08);
+            width: 100%; max-width: 360px;
+            padding: 28px 24px;
+        }
+        .icon {
+            width: 44px; height: 44px; border-radius: 12px;
+            background: linear-gradient(135deg, #7dd3fc 0%, #0ea5e9 100%);
+            display: grid; place-items: center;
+            margin: 0 auto 16px;
+        }
+        .icon svg { width: 22px; height: 22px; color: white }
+        h1 { font-size: 20px; font-weight: 600; text-align: center; margin-bottom: 4px }
+        p.sub { text-align: center; color: #64748b; font-size: 14px; margin-bottom: 18px }
+        .ssid-pill {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            background: #f1f5f9; border-radius: 10px;
+            padding: 10px 14px; margin-bottom: 22px;
+            color: #334155; font-size: 14px;
+        }
+        .ssid-pill strong { color: #0f172a; font-weight: 600 }
+        label { display: block; font-size: 12px; font-weight: 600; color: #475569;
+            text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px }
+        input[type="text"], input[type="password"] {
+            width: 100%; padding: 12px 14px; border: 1.5px solid #e2e8f0;
+            border-radius: 10px; font-size: 16px; -webkit-appearance: none;
+            transition: border-color .15s, box-shadow .15s;
+        }
+        input:focus { outline: none; border-color: #0ea5e9; box-shadow: 0 0 0 3px rgba(14, 165, 233, .15) }
+        .field { margin-bottom: 16px }
+        button {
+            width: 100%; padding: 13px;
+            background: #0ea5e9; color: white; border: 0; border-radius: 10px;
+            font-size: 15px; font-weight: 600;
+            cursor: pointer;
+            transition: background .15s, transform .05s;
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        button:hover:not(:disabled) { background: #0284c7 }
+        button:active:not(:disabled) { transform: translateY(1px) }
+        button:disabled { background: #94a3b8; cursor: not-allowed }
+        .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.4);
+            border-top-color: white; border-radius: 50%;
+            animation: spin .7s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg) } }
+        .alert {
+            margin-top: 14px; padding: 10px 12px; border-radius: 10px;
+            font-size: 13px; line-height: 1.4;
+            display: none;
+        }
+        .alert.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca }
+        .alert.success { background: #ecfdf5; color: #047857; border: 1px solid #bbf7d0 }
+        .alert.show { display: block }
+        .footer {
+            margin-top: 18px; text-align: center;
+            font-size: 11px; color: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12.55a8 8 0 0114 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a4 4 0 016.95 0M12 20h.01"/>
+            </svg>
+        </div>
+        <h1>Sign in to WiFi</h1>
+        <p class="sub">Authentication required to use this network</p>
+
+        <div class="ssid-pill">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 11c0-1.1.9-2 2-2s2 .9 2 2-2 4-2 4-2-2.9-2-4z"/><circle cx="12" cy="11" r="9"/></svg>
+            Connecting to <strong>{{ ssid }}</strong>
+        </div>
+
+        <form id="auth-form" method="post" action="/captive/authenticate">
+            <input type="hidden" name="ssid" value="{{ ssid }}">
+            <div class="field">
+                <label for="username">Email or username</label>
+                <input id="username" name="username" type="text" required autocomplete="username" autocapitalize="none" autocorrect="off" inputmode="email">
+            </div>
+            <div class="field">
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password" required autocomplete="current-password">
+            </div>
+            <button type="submit" id="submit">
+                <span class="label">Connect</span>
+            </button>
+            <div id="alert" class="alert"></div>
+        </form>
+
+        <p class="footer">By connecting you agree to the network's terms of service.</p>
+    </div>
+
+    <script>
+    (() => {
+        const form = document.getElementById('auth-form');
+        const btn = document.getElementById('submit');
+        const alert = document.getElementById('alert');
+        const labelSpan = btn.querySelector('.label');
+        form.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            alert.className = 'alert';
+            btn.disabled = true;
+            const orig = labelSpan.textContent;
+            labelSpan.innerHTML = '<span class="spinner"></span>';
+            try {
+                const r = await fetch('/captive/authenticate', { method: 'POST', body: new FormData(form) });
+                const j = await r.json().catch(() => ({}));
+                if (j.success) {
+                    alert.textContent = j.message || 'Authentication successful.';
+                    alert.classList.add('success', 'show');
+                    setTimeout(() => { window.location.href = j.redirect || 'http://www.google.com'; }, 1500);
+                } else {
+                    alert.textContent = j.message || 'Authentication failed.';
+                    alert.classList.add('error', 'show');
+                    btn.disabled = false; labelSpan.textContent = orig;
+                }
+            } catch (e) {
+                alert.textContent = 'Connection error. Please try again.';
+                alert.classList.add('error', 'show');
+                btn.disabled = false; labelSpan.textContent = orig;
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

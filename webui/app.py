@@ -25,10 +25,12 @@ from core.config_loader import ensure_persistent_secret, load_config
 from core.database import Database
 
 from webui import auth as auth_mod
+from webui.routes import captive as captive_routes
 from webui.routes import dashboard as dashboard_routes
 from webui.routes import handshakes as handshakes_routes
 from webui.routes import networks as networks_routes
 from webui.routes import scans as scans_routes
+from webui.routes import settings as settings_routes
 from webui.routes import system as system_routes
 
 logger = logging.getLogger("pendonn.webui")
@@ -128,3 +130,5 @@ app.include_router(networks_routes.router)
 app.include_router(handshakes_routes.router)
 app.include_router(scans_routes.router)
 app.include_router(system_routes.router)
+app.include_router(settings_routes.router)
+app.include_router(captive_routes.router)

@@ -538,5 +538,126 @@ class TestSystemPage(unittest.TestCase):
         self.assertEqual(len(db.get_networks()), 0)
 
 
+@unittest.skipUnless(HAVE_FASTAPI, "fastapi not installed")
+class TestSettingsPage(unittest.TestCase):
+    """Settings: read-only config viewer + whitelist CRUD."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.app, cls.config_path, cls.db_path = _build_app_fixture(cls.tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.app.state.db.close_all()
+        except Exception:
+            pass
+        try:
+            cls.tmp.cleanup()
+        except (PermissionError, OSError):
+            pass
+
+    def setUp(self):
+        self.client = TestClient(self.app)
+        self.client.post(
+            "/login",
+            data={"username": "tester", "password": "hunter2-correct-horse", "next": "/"},
+            follow_redirects=False,
+        )
+
+    def test_settings_page_renders(self):
+        r = self.client.get("/settings")
+        self.assertEqual(r.status_code, 200)
+        # Title
+        self.assertIn("Whitelisted SSIDs", r.text)
+        self.assertIn("Configuration", r.text)
+        # Safety pills present
+        self.assertIn("SSHGuard", r.text)
+        self.assertIn("Web auth", r.text)
+
+    def test_secrets_redacted_in_config_dump(self):
+        r = self.client.get("/settings")
+        self.assertEqual(r.status_code, 200)
+        # The fixture's actual hash and secret_key MUST NOT appear
+        self.assertNotIn("hunter2-correct-horse", r.text)  # plaintext
+        self.assertNotIn("scrypt:", r.text)                # generated hash prefix
+        # The literal 'x'*64 secret_key shouldn't either
+        self.assertNotIn("x" * 32, r.text)
+        # The "<redacted>" marker should be present somewhere
+        self.assertIn("redacted", r.text)
+
+    def test_whitelist_add_then_remove(self):
+        r = self.client.post("/partials/whitelist/add", data={"ssid": "MyHome"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("MyHome", r.text)
+        # Adding again is a no-op
+        r2 = self.client.post("/partials/whitelist/add", data={"ssid": "MyHome"})
+        self.assertEqual(r2.status_code, 200)
+        # Remove
+        r3 = self.client.post("/partials/whitelist/remove", data={"ssid": "MyHome"})
+        self.assertEqual(r3.status_code, 200)
+        self.assertNotIn("MyHome", r3.text)
+
+    def test_whitelist_persists_to_overlay_file(self):
+        self.client.post("/partials/whitelist/add", data={"ssid": "PersistMe"})
+        overlay = self.config_path + ".local"
+        self.assertTrue(os.path.isfile(overlay))
+        import json as _json
+        with open(overlay) as f:
+            data = _json.load(f)
+        self.assertIn("PersistMe", data.get("whitelist", {}).get("ssids", []))
+
+    def test_whitelist_rejects_bad_ssid(self):
+        r = self.client.post("/partials/whitelist/add", data={"ssid": "bad\nname"})
+        self.assertEqual(r.status_code, 400)
+        r2 = self.client.post("/partials/whitelist/add", data={"ssid": ""})
+        self.assertEqual(r2.status_code, 400)
+        r3 = self.client.post("/partials/whitelist/add", data={"ssid": "a" * 33})
+        self.assertEqual(r3.status_code, 400)
+
+
+@unittest.skipUnless(HAVE_FASTAPI, "fastapi not installed")
+class TestCaptivePortal(unittest.TestCase):
+    """Captive portal endpoints — must be anonymous (auth disabled)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.app, cls.config_path, cls.db_path = _build_app_fixture(cls.tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.app.state.db.close_all()
+        except Exception:
+            pass
+        try:
+            cls.tmp.cleanup()
+        except (PermissionError, OSError):
+            pass
+
+    def test_captive_root_anonymous(self):
+        # No login — must still serve the portal
+        c = TestClient(self.app)
+        r = c.get("/captive?ssid=Kjell-Guest")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Kjell-Guest", r.text)
+        self.assertIn("Sign in to WiFi", r.text)
+
+    def test_captive_authenticate_logs_credential_anonymously(self):
+        c = TestClient(self.app)
+        r = c.post("/captive/authenticate", data={
+            "ssid": "Kjell-Guest", "username": "victim@example.com", "password": "supersecret",
+        })
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["success"])
+        self.assertIn("redirect", body)
+        # The credential should land in system_logs (no EvilTwin instance in tests)
+        logs = self.app.state.db.get_logs(module="captive_portal")
+        self.assertTrue(any("victim@example.com" in (l.get("message") or "") for l in logs))
+
+
 if __name__ == "__main__":
     unittest.main()

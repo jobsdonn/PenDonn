@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Settings — PenDonn{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- Whitelist editor -->
+    <section class="lg:col-span-2 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
+        <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
+            <h2 class="font-semibold">Whitelisted SSIDs</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                The WiFi scanner skips these networks entirely — no scanning, deauth, capture, or enumeration.
+                Add your own networks plus any in-scope APs the customer has explicitly excluded.
+            </p>
+        </header>
+        <div class="p-5 space-y-4">
+            <form hx-post="/partials/whitelist/add"
+                  hx-target="#whitelist"
+                  hx-swap="outerHTML"
+                  hx-on::after-request="if(event.detail.successful) this.reset()"
+                  class="flex gap-2">
+                <input type="text" name="ssid" required maxlength="32" placeholder="e.g. My-Home-WiFi"
+                       class="flex-1 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm">
+                <button type="submit" class="px-3 py-1.5 rounded-md bg-accent-deep text-white text-sm font-medium hover:bg-sky-600">Add</button>
+            </form>
+            {% include "partials/whitelist.html" %}
+        </div>
+    </section>
+
+    <!-- Safety status -->
+    <section class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
+        <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
+            <h2 class="font-semibold">Safety</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                See <a href="https://github.com/" class="text-accent-deep hover:underline">docs/SAFETY.md</a> on the device for the full model.
+            </p>
+        </header>
+        <div class="px-5 py-4 space-y-3 text-sm">
+            {% macro pill(label, ok, ok_label, bad_label, accent='emerald') %}
+            <div class="flex items-center justify-between gap-3">
+                <span class="text-slate-600 dark:text-slate-300">{{ label }}</span>
+                {% if ok %}
+                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-{{ accent }}-100 text-{{ accent }}-700 dark:bg-{{ accent }}-950 dark:text-{{ accent }}-300">
+                    <span class="w-1.5 h-1.5 rounded-full bg-current"></span>{{ ok_label }}
+                </span>
+                {% else %}
+                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                    <span class="w-1.5 h-1.5 rounded-full bg-current"></span>{{ bad_label }}
+                </span>
+                {% endif %}
+            </div>
+            {% endmacro %}
+            {{ pill('SSHGuard',                   safety.ssh_guard_enabled,            'on',         'OFF') }}
+            {{ pill('Management iface protected', safety.block_management_monitor,     'enforced',   'permissive') }}
+            {{ pill('SSH-iface protected',        safety.block_ssh_iface_monitor,      'enforced',   'permissive') }}
+            {{ pill('Web auth',                   safety.auth_enabled,                 'enabled',    'disabled') }}
+            {{ pill('Web bind',                   safety.loopback_only,                'loopback',   'LAN-exposed', accent='sky') }}
+            {% if safety.armed_override %}
+            <div class="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-md p-2 mt-2">
+                <strong>armed_override</strong> is on — SSH-lockout protections are bypassed.
+                Only legitimate for RPi Zero 2 W single-iface mode or SSH-over-Ethernet.
+            </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- Config viewer (full-width, collapsible) -->
+    <section class="lg:col-span-3 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl"
+             x-data="{ open: false }">
+        <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700 flex items-center justify-between">
+            <div>
+                <h2 class="font-semibold">Configuration</h2>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Loaded from <code class="font-mono">{{ config_path }}</code>
+                    {% if overlay_exists %}+ <code class="font-mono">{{ overlay_path }}</code> overlay{% endif %}.
+                    Secrets redacted. Edit on the device, not from this UI.
+                </p>
+            </div>
+            <button @click="open = !open" class="px-3 py-1.5 text-sm rounded bg-slate-100 dark:bg-ink-800 hover:bg-slate-200 dark:hover:bg-ink-700">
+                <span x-show="!open">Show</span><span x-show="open">Hide</span>
+            </button>
+        </header>
+        <div x-show="open" x-cloak>
+            <pre class="px-5 py-4 text-xs font-mono overflow-auto bg-ink-950 text-slate-100 rounded-b-xl" style="max-height: 60vh">{{ config_json }}</pre>
+        </div>
+    </section>
+</div>
+{% endblock %}
