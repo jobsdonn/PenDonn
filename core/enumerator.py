@@ -14,6 +14,12 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import nmap
 from .interface_manager import resolve_interfaces
+from .secure_io import (
+    encode_wpa_supplicant_psk,
+    encode_wpa_supplicant_ssid,
+    sanitize_iface_name,
+    secure_temp_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -278,16 +284,32 @@ class NetworkEnumerator:
             subprocess.run(['ip', 'link', 'set', interface, 'up'], check=True)
             time.sleep(2)
             
-            # Create WPA supplicant configuration
-            wpa_conf = f"""
-network={{
-    ssid="{ssid}"
-    psk="{password}"
-    key_mgmt=WPA-PSK
-}}
-"""
-            conf_file = '/tmp/wpa_supplicant_pendonn.conf'
-            with open(conf_file, 'w') as f:
+            # Build WPA supplicant config in a 0600 file inside the secure
+            # per-process temp dir (was world-readable /tmp/wpa_supplicant_pendonn.conf
+            # with the PSK in cleartext — anyone on the box could grab it).
+            #
+            # Use the hex form for the SSID (sidesteps quote/escape pitfalls
+            # for SSIDs containing quotes or non-ASCII bytes) and the proper
+            # quoted/escaped form for the passphrase. Both helpers raise
+            # ValueError on invalid input rather than silently producing a
+            # broken config.
+            safe_iface = sanitize_iface_name(interface)
+            try:
+                ssid_value = encode_wpa_supplicant_ssid(ssid)
+                psk_value = encode_wpa_supplicant_psk(password)
+            except ValueError as e:
+                logger.error("Cannot build wpa_supplicant config: %s", e)
+                return (False, f"invalid SSID/PSK for wpa_supplicant: {e}")
+
+            wpa_conf = (
+                "network={\n"
+                f"    ssid={ssid_value}\n"
+                f"    psk={psk_value}\n"
+                "    key_mgmt=WPA-PSK\n"
+                "}\n"
+            )
+            conf_file = secure_temp_config("wpa_supplicant")
+            with open(conf_file, "w") as f:
                 f.write(wpa_conf)
             
             # Kill only wpa_supplicant for this specific interface (not all!)
@@ -304,11 +326,11 @@ network={{
                 logger.warning(f"Could not kill existing wpa_supplicant for {interface}: {e}")
             
             # Start wpa_supplicant on enumeration interface
-            logger.info(f"Starting wpa_supplicant on {interface}")
+            logger.info(f"Starting wpa_supplicant on {safe_iface}")
             subprocess.Popen([
                 'wpa_supplicant',
                 '-B',  # Background
-                '-i', interface,
+                '-i', safe_iface,
                 '-c', conf_file
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             

@@ -545,16 +545,21 @@ class PasswordCracker:
                 return None
             
             logger.info(f"Cracking with aircrack-ng: {ssid}")
-            
+
             # Run aircrack-ng
             start_time = time.time()
-            
+
+            # Was: '-l /tmp/cracked_{id}.txt' — wrote cracked PSK to a
+            # world-readable file. Use the per-process secure temp dir instead.
+            from .secure_io import secure_temp_config
+            cracked_out = secure_temp_config(f"cracked_{handshake_id}", suffix=".txt")
+
             cmd = [
                 'aircrack-ng',
                 capture_file,
                 '-w', self.wordlist,
                 '-b', bssid,  # Specify BSSID to avoid interactive prompt
-                '-l', f'/tmp/cracked_{handshake_id}.txt'  # Output file for password
+                '-l', cracked_out,  # Output file for password (0600 in secure dir)
             ]
             
             logger.info(f"Running aircrack-ng command: {' '.join(cmd)}")

