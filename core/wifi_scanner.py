@@ -304,19 +304,30 @@ class WiFiScanner:
                     time.sleep(2)
                     continue
                 
+                # Make sure scan_dir exists every iteration. The constructor
+                # creates it once, but a deploy that uses `rsync --delete`
+                # against /opt/pendonn can wipe it out between starts (lesson
+                # from 2026-04-25). Cheap to re-check; loud failures otherwise.
+                os.makedirs(self.scan_dir, exist_ok=True)
+
                 # Run airodump-ng scan for 10 seconds
                 scan_file = os.path.join(self.scan_dir, f"scan_{int(time.time())}")
-                
+
                 logger.debug(f"Running 10-second scan on {self.interface}...")
-                
+
                 # Start airodump-ng in background mode
                 # --output-format csv: CSV output only
                 # -w: write to file
+                # --write-interval 1: flush CSV every 1s. Without this,
+                #   when we terminate() airodump after 10s the buffered
+                #   CSV writes are lost — produces 0-byte files. Same
+                #   reason handshake_capture sets it (see _capture_handshake).
                 # Scan both 2.4GHz (1-13) and 5GHz (36-165) channels
                 self.active_scan_process = subprocess.Popen([
                     'airodump-ng',
                     '--output-format', 'csv',
                     '-w', scan_file,
+                    '--write-interval', '1',
                     '--band', 'abg',  # a=5GHz, b/g=2.4GHz
                     self.interface
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

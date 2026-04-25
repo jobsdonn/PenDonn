@@ -43,6 +43,7 @@ NC='\033[0m' # No Color
 INSTALL_DIR="/opt/pendonn"
 SERVICE_NAME="pendonn"
 WEB_SERVICE_NAME="pendonn-web"
+WEBUI_SERVICE_NAME="pendonn-webui"
 
 echo -e "${BLUE}"
 cat << "EOF"
@@ -620,18 +621,24 @@ Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin
 ExecStart=$INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/main.py
 Restart=always
 RestartSec=10
-StandardOutput=append:$INSTALL_DIR/logs/pendonn.log
-StandardError=append:$INSTALL_DIR/logs/pendonn_error.log
+# stdout/stderr → journald. The Python app ALSO writes a copy to
+# logs/pendonn.log via FileHandler for offline tail; using
+# StandardOutput=append: as well would double every line in the file
+# (incident debugged 2026-04-25). Journal is the single source of truth
+# for live streaming via the new UI's /api/logs/stream endpoint.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pendonn
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Set up systemd service for web interface
+# Set up systemd service for legacy Flask web interface (port 8080)
 cat > /etc/systemd/system/${WEB_SERVICE_NAME}.service << EOF
 [Unit]
-Description=PenDonn Web Interface
-After=network.target
+Description=PenDonn Web Interface (legacy Flask, port 8080)
+After=network.target pendonn.service
 Wants=network.target
 
 [Service]
@@ -642,8 +649,33 @@ Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin
 ExecStart=$INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/web/app.py
 Restart=always
 RestartSec=10
-StandardOutput=append:$INSTALL_DIR/logs/web.log
-StandardError=append:$INSTALL_DIR/logs/web_error.log
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pendonn-web
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Set up systemd service for the new FastAPI/HTMX UI (port 8081)
+cat > /etc/systemd/system/${WEBUI_SERVICE_NAME}.service << EOF
+[Unit]
+Description=PenDonn Web UI (modern FastAPI+HTMX, port 8081)
+After=network.target pendonn.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$INSTALL_DIR
+Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONPATH=$INSTALL_DIR"
+ExecStart=$INSTALL_DIR/venv/bin/python3 -m uvicorn webui.app:app --host 0.0.0.0 --port 8081 --no-access-log
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pendonn-webui
 
 [Install]
 WantedBy=multi-user.target
