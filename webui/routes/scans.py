@@ -29,13 +29,12 @@ def scans_page(request: Request, username: str = Depends(require_login)):
     db = request.app.state.db
     scans = [_decode_results(s) for s in db.get_scans()]
     return request.app.state.templates.TemplateResponse(
+        request,
         "scans.html",
         {
-            "request": request,
-            "username": username,
+                       "username": username,
             "active_nav": "scans",
-            "scans": scans,
-        },
+            "scans": scans,},
     )
 
 
@@ -44,8 +43,9 @@ def scans_partial(request: Request, username: str = Depends(require_login)):
     db = request.app.state.db
     scans = [_decode_results(s) for s in db.get_scans()]
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/scans_table.html",
-        {"request": request, "scans": scans},
+        {"request": request, "scans": scans,},
     )
 
 
@@ -63,8 +63,9 @@ def scan_detail_partial(
     scan = _decode_results(scans[0])
     vulns = db.get_vulnerabilities(scan_id=scan_id)
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/scan_detail.html",
-        {"request": request, "scan": scan, "vulns": vulns},
+        {"request": request, "scan": scan, "vulns": vulns,},
     )
 
 
@@ -79,15 +80,14 @@ def vulns_page(
     vulns = db.get_vulnerabilities(severity=sev_filter)
     grouped = _group_by_severity(db.get_vulnerabilities())
     return request.app.state.templates.TemplateResponse(
+        request,
         "vulnerabilities.html",
         {
-            "request": request,
-            "username": username,
+                       "username": username,
             "active_nav": "vulns",
             "vulns": vulns,
             "grouped": grouped,
-            "severity": severity,
-        },
+            "severity": severity,},
     )
 
 
@@ -101,8 +101,9 @@ def vulns_partial(
     sev_filter = None if severity == "all" else severity
     vulns = db.get_vulnerabilities(severity=sev_filter)
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/vulns_table.html",
-        {"request": request, "vulns": vulns, "severity": severity},
+        {"request": request, "vulns": vulns, "severity": severity,},
     )
 
 

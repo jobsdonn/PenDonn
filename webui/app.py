@@ -92,9 +92,10 @@ def login_page(request: Request, next: str = "/", error: Optional[str] = None):
     if auth_mod.is_logged_in(request):
         return RedirectResponse(next or "/", status_code=status.HTTP_303_SEE_OTHER)
     return templates.TemplateResponse(
+        request,
         "login.html",
         {"request": request, "next": next, "error": error,
-         "auth_enabled": app.state.auth.enabled},
+         "auth_enabled": app.state.auth.enabled,},
     )
 
 

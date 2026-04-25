@@ -76,10 +76,10 @@ def settings_page(request: Request, username: str = Depends(require_login)):
     cfg = request.app.state.config
     al = cfg.get("allowlist", {}) or {}
     return request.app.state.templates.TemplateResponse(
+        request,
         "settings.html",
         {
-            "request": request,
-            "username": username,
+                       "username": username,
             "active_nav": "settings",
             "config_redacted": _redact(cfg),
             "config_json": json.dumps(_redact(cfg), indent=2, sort_keys=True),
@@ -88,8 +88,7 @@ def settings_page(request: Request, username: str = Depends(require_login)):
             "safety": _safety_status(cfg),
             "config_path": request.app.state.config_path,
             "overlay_path": local_overlay_path(request.app.state.config_path),
-            "overlay_exists": os.path.isfile(local_overlay_path(request.app.state.config_path)),
-        },
+            "overlay_exists": os.path.isfile(local_overlay_path(request.app.state.config_path)),},
     )
 
 
@@ -99,12 +98,11 @@ def allowlist_partial(request: Request, username: str = Depends(require_login)):
     cfg = request.app.state.config
     al = cfg.get("allowlist", {}) or {}
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/allowlist.html",
         {
-            "request": request,
-            "allowlist": list(al.get("ssids") or []),
-            "allowlist_strict": bool(al.get("strict", True)),
-        },
+                       "allowlist": list(al.get("ssids") or []),
+            "allowlist_strict": bool(al.get("strict", True)),},
     )
 
 
@@ -176,9 +174,10 @@ def allowlist_add(
         _persist_allowlist(request, current)
     al = cfg.get("allowlist", {}) or {}
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/allowlist.html",
         {"request": request, "allowlist": current,
-         "allowlist_strict": bool(al.get("strict", True))},
+         "allowlist_strict": bool(al.get("strict", True)),},
     )
 
 
@@ -199,9 +198,10 @@ def allowlist_remove(
         _persist_allowlist(request, current)
     al = cfg.get("allowlist", {}) or {}
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/allowlist.html",
         {"request": request, "allowlist": current,
-         "allowlist_strict": bool(al.get("strict", True))},
+         "allowlist_strict": bool(al.get("strict", True)),},
     )
 
 
@@ -224,6 +224,7 @@ def allowlist_strict_toggle(
     current = _current_allowlist(cfg)
     _persist_allowlist(request, current, strict=new_strict)
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/allowlist.html",
-        {"request": request, "allowlist": current, "allowlist_strict": new_strict},
+        {"request": request, "allowlist": current, "allowlist_strict": new_strict,},
     )

@@ -66,17 +66,16 @@ def networks_page(
     db = request.app.state.db
     networks = _sorted_filtered_networks(db, q, sort, order, only)
     return request.app.state.templates.TemplateResponse(
+        request,
         "networks.html",
         {
-            "request": request,
-            "username": username,
+                       "username": username,
             "active_nav": "networks",
             "networks": networks,
             "q": q,
             "sort": sort if sort in _SORT_COLUMNS else _DEFAULT_SORT,
             "order": order if order in ("asc", "desc") else "desc",
-            "only": only if only in ("all", "white", "open") else "all",
-        },
+            "only": only if only in ("all", "white", "open") else "all",},
     )
 
 
@@ -93,14 +92,13 @@ def networks_partial(
     db = request.app.state.db
     networks = _sorted_filtered_networks(db, q, sort, order, only)
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/networks_table.html",
         {
-            "request": request,
-            "networks": networks,
+                       "networks": networks,
             "sort": sort if sort in _SORT_COLUMNS else _DEFAULT_SORT,
             "order": order if order in ("asc", "desc") else "desc",
-            "q": q, "only": only,
-        },
+            "q": q, "only": only,},
     )
 
 
@@ -121,6 +119,7 @@ def toggle_whitelist(
     if not network:
         raise HTTPException(status_code=404, detail="network not found")
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/networks_row.html",
-        {"request": request, "n": network},
+        {"request": request, "n": network,},
     )

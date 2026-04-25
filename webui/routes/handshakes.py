@@ -37,14 +37,13 @@ def handshakes_page(
     only_status = None if status == "all" else status
     handshakes = [_annotate_handshake(h) for h in db.get_all_handshakes(only_status)]
     return request.app.state.templates.TemplateResponse(
+        request,
         "handshakes.html",
         {
-            "request": request,
-            "username": username,
+                       "username": username,
             "active_nav": "handshakes",
             "handshakes": handshakes,
-            "status": status,
-        },
+            "status": status,},
     )
 
 
@@ -58,8 +57,9 @@ def handshakes_partial(
     only_status = None if status == "all" else status
     handshakes = [_annotate_handshake(h) for h in db.get_all_handshakes(only_status)]
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/handshakes_table.html",
-        {"request": request, "handshakes": handshakes, "status": status},
+        {"request": request, "handshakes": handshakes, "status": status,},
     )
 
 
@@ -67,13 +67,12 @@ def handshakes_partial(
 def passwords_page(request: Request, username: str = Depends(require_login)):
     db = request.app.state.db
     return request.app.state.templates.TemplateResponse(
+        request,
         "passwords.html",
         {
-            "request": request,
-            "username": username,
+                       "username": username,
             "active_nav": "passwords",
-            "passwords": db.get_cracked_passwords(),
-        },
+            "passwords": db.get_cracked_passwords(),},
     )
 
 
@@ -81,6 +80,7 @@ def passwords_page(request: Request, username: str = Depends(require_login)):
 def passwords_partial(request: Request, username: str = Depends(require_login)):
     db = request.app.state.db
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/passwords_table.html",
-        {"request": request, "passwords": db.get_cracked_passwords()},
+        {"request": request, "passwords": db.get_cracked_passwords(),},
     )

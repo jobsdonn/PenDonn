@@ -18,13 +18,12 @@ def dashboard(request: Request, username: str = Depends(require_login)):
     db = request.app.state.db
     stats = db.get_statistics()
     return request.app.state.templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
-            "username": username,
+                       "username": username,
             "active_nav": "dashboard",
-            "stats": stats,
-        },
+            "stats": stats,},
     )
 
 
@@ -34,6 +33,7 @@ def stats_partial(request: Request, username: str = Depends(require_login)):
     db = request.app.state.db
     stats = db.get_statistics()
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/stats.html",
-        {"request": request, "stats": stats},
+        {"request": request, "stats": stats,},
     )

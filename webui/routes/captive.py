@@ -38,8 +38,9 @@ def captive_root(request: Request, ssid: Optional[str] = None):
         target_ssid = "WiFi"
 
     return request.app.state.templates.TemplateResponse(
+        request,
         "captive_portal.html",
-        {"request": request, "ssid": target_ssid},
+        {"request": request, "ssid": target_ssid,},
     )
 
 

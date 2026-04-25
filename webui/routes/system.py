@@ -58,8 +58,9 @@ def _service_status(name: str) -> str:
 def services_partial(request: Request, username: str = Depends(require_login)):
     statuses = {svc: _service_status(svc) for svc in _ALLOWED_SERVICES}
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/services.html",
-        {"request": request, "statuses": statuses, "have_systemctl": _have_systemctl()},
+        {"request": request, "statuses": statuses, "have_systemctl": _have_systemctl(),},
     )
 
 
@@ -77,13 +78,12 @@ def service_action(
     if not _have_systemctl():
         # Return a partial that shows the platform-unavailable state
         return request.app.state.templates.TemplateResponse(
+            request,
             "partials/services.html",
             {
-                "request": request,
-                "statuses": {svc: "unavailable" for svc in _ALLOWED_SERVICES},
+                               "statuses": {svc: "unavailable" for svc in _ALLOWED_SERVICES},
                 "have_systemctl": False,
-                "last_action_message": f"systemctl not available on this host — '{action} {service}' was not executed",
-            },
+                "last_action_message": f"systemctl not available on this host — '{action} {service}' was not executed",},
         )
     try:
         r = subprocess.run(
@@ -99,13 +99,12 @@ def service_action(
         msg = f"{action} {service}: {e}"
     statuses = {svc: _service_status(svc) for svc in _ALLOWED_SERVICES}
     return request.app.state.templates.TemplateResponse(
+        request,
         "partials/services.html",
         {
-            "request": request,
-            "statuses": statuses,
+                       "statuses": statuses,
             "have_systemctl": True,
-            "last_action_message": msg,
-        },
+            "last_action_message": msg,},
     )
 
 
@@ -116,13 +115,12 @@ def service_action(
 @router.get("/logs")
 def logs_page(request: Request, username: str = Depends(require_login)):
     return request.app.state.templates.TemplateResponse(
+        request,
         "logs.html",
         {
-            "request": request,
-            "username": username,
+                       "username": username,
             "active_nav": "logs",
-            "have_systemctl": _have_systemctl(),
-        },
+            "have_systemctl": _have_systemctl(),},
     )
 
 
