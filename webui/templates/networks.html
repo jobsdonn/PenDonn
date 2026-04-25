@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Networks — PenDonn{% endblock %}
+{% block page_title %}Networks{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+    <!-- Toolbar: search + filter + manual refresh -->
+    <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <form class="flex-1 max-w-md"
+              hx-get="/partials/networks"
+              hx-target="#networks-table"
+              hx-swap="outerHTML"
+              hx-trigger="input delay:250ms from:#search, change from:#only-filter">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            <input type="hidden" name="order" value="{{ order }}">
+            <div class="flex gap-2">
+                <div class="relative flex-1">
+                    <svg class="w-4 h-4 absolute left-3 top-2.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 21l-4.35-4.35M11 19a8 8 0 110-16 8 8 0 010 16z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <input id="search" name="q" value="{{ q }}" placeholder="Search SSID, BSSID, encryption…"
+                           class="w-full pl-9 pr-3 py-2 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm">
+                </div>
+                <select id="only-filter" name="only"
+                        class="rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm">
+                    <option value="all"   {% if only == 'all' %}selected{% endif %}>All</option>
+                    <option value="open"  {% if only == 'open' %}selected{% endif %}>In scope only</option>
+                    <option value="white" {% if only == 'white' %}selected{% endif %}>Whitelisted only</option>
+                </select>
+            </div>
+        </form>
+        <div class="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+            <span hx-get="/partials/networks?q={{ q }}&sort={{ sort }}&order={{ order }}&only={{ only }}"
+                  hx-target="#networks-table"
+                  hx-swap="outerHTML"
+                  hx-trigger="every 10s"
+                  class="inline-flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
+                Live (10s)
+            </span>
+        </div>
+    </div>
+
+    {% include "partials/networks_table.html" %}
+</div>
+{% endblock %}

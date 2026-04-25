@@ -1,0 +1,65 @@
+{# The whole table — swapped in/out by HTMX whenever search/sort/filter
+   changes or the 10s timer fires. id="networks-table" is the swap target. #}
+{% macro sort_link(label, key) %}
+    {% set new_order = 'asc' if (sort == key and order == 'desc') else 'desc' %}
+    <a class="group inline-flex items-center gap-1 hover:text-slate-900 dark:hover:text-white"
+       hx-get="/partials/networks?q={{ q }}&only={{ only }}&sort={{ key }}&order={{ new_order }}"
+       hx-target="#networks-table" hx-swap="outerHTML" hx-push-url="false"
+       href="#">
+        {{ label }}
+        {% if sort == key %}
+            <svg class="w-3 h-3 text-accent-deep" viewBox="0 0 12 12" fill="currentColor">
+                {% if order == 'asc' %}<path d="M6 3l4 5H2z"/>{% else %}<path d="M6 9L2 4h8z"/>{% endif %}
+            </svg>
+        {% else %}
+            <svg class="w-3 h-3 opacity-0 group-hover:opacity-50" viewBox="0 0 12 12" fill="currentColor"><path d="M6 9L2 4h8z"/></svg>
+        {% endif %}
+    </a>
+{% endmacro %}
+
+<div id="networks-table" class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl overflow-hidden">
+    {% if networks %}
+    <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+            <thead class="bg-slate-50 dark:bg-ink-800/60 text-left text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                <tr>
+                    <th class="px-4 py-3 font-medium">{{ sort_link('SSID', 'ssid') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ sort_link('BSSID', 'bssid') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ sort_link('Ch', 'channel') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ sort_link('Encryption', 'encryption') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ sort_link('Signal', 'signal') }}</th>
+                    <th class="px-4 py-3 font-medium">{{ sort_link('Last seen', 'last_seen') }}</th>
+                    <th class="px-4 py-3 font-medium text-right">Whitelist</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-200 dark:divide-ink-700">
+                {% for n in networks %}
+                    {% include "partials/networks_row.html" %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-ink-700 flex items-center justify-between">
+        <span>{{ networks|length }} network{{ 's' if networks|length != 1 }}</span>
+        {% if q or only != 'all' %}
+        <a hx-get="/partials/networks?sort={{ sort }}&order={{ order }}"
+           hx-target="#networks-table" hx-swap="outerHTML" href="#"
+           class="text-accent-deep hover:underline">clear filters</a>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="px-6 py-16 text-center">
+        <svg class="w-10 h-10 mx-auto text-slate-300 dark:text-ink-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 12.55a8 8 0 0114 0M1.42 9a16 16 0 0121.16 0M8.53 16.11a4 4 0 016.95 0M12 20h.01" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <h3 class="mt-3 font-medium">No networks yet</h3>
+        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            {% if q or only != 'all' %}
+                Nothing matches the current filter.
+                <a hx-get="/partials/networks" hx-target="#networks-table" hx-swap="outerHTML" href="#" class="text-accent-deep hover:underline">Show all</a>
+            {% else %}
+                The scanner hasn't discovered any networks yet, or the daemon isn't running.
+                Run <code class="font-mono text-xs">sudo systemctl start pendonn</code> on the device.
+            {% endif %}
+        </p>
+    </div>
+    {% endif %}
+</div>
