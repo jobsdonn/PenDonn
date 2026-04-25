@@ -1,10 +1,35 @@
 <!doctype html>
-<html lang="en" class="h-full" x-data="{ dark: localStorage.getItem('pendonn-theme') !== 'light' }" x-bind:class="dark ? 'dark' : ''">
+<html lang="en" class="h-full">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark light">
     <title>{% block title %}PenDonn{% endblock %}</title>
+
+    <!-- Synchronous theme init: sets `class="dark"` on <html> BEFORE any
+         CSS or paint, so navigating between pages doesn't flash white.
+         Default = dark (matches our visual identity); operators who pick
+         light persist that choice in localStorage. Must run before the
+         Tailwind script tag below. -->
+    <script>
+        (function() {
+            try {
+                var t = localStorage.getItem('pendonn-theme');
+                if (t !== 'light') document.documentElement.classList.add('dark');
+            } catch (e) {
+                document.documentElement.classList.add('dark');
+            }
+        })();
+    </script>
+    <!-- Inline pre-Tailwind CSS sets the body bg synchronously to the
+         right tone so the first paint matches the eventual Tailwind
+         output. Tailwind CDN takes a tick to apply utility classes;
+         without this the body is browser-default (white) for ~100ms. -->
+    <style>
+        html { background-color: #f8fafc; }      /* slate-50 (light default) */
+        html.dark { background-color: #0b0d12; } /* ink-950 (dark default)  */
+        body { background: inherit; color: inherit; }
+    </style>
 
     <!-- Tailwind via CDN. Pinned major. The Play CDN is fine for an
          on-device admin UI; if Pi has no internet, swap to a vendored
@@ -49,7 +74,9 @@
         .dark ::-webkit-scrollbar-track { background: transparent }
     </style>
 </head>
-<body class="h-full bg-slate-50 text-slate-900 dark:bg-ink-950 dark:text-slate-100 font-sans antialiased">
+<body x-data="{ dark: document.documentElement.classList.contains('dark') }"
+      x-effect="document.documentElement.classList.toggle('dark', dark)"
+      class="h-full bg-slate-50 text-slate-900 dark:bg-ink-950 dark:text-slate-100 font-sans antialiased">
 
 {% if username %}
 <div class="min-h-full flex">
