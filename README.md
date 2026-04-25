@@ -424,14 +424,17 @@ pendonn/
 │   └── config.json              # Main configuration
 ├── core/
 │   ├── database.py              # SQLite database handler
-│   ├── wifi_monitor.py          # WiFi scanning & handshake capture
+│   ├── wifi_scanner.py          # WiFi scanning & handshake capture (airodump-ng)
 │   ├── cracker.py               # Password cracking engine
 │   ├── enumerator.py            # Network enumeration
 │   ├── plugin_manager.py        # Plugin system
 │   ├── interface_manager.py     # MAC-based interface detection
 │   ├── evil_twin.py             # Evil Twin attack module
 │   ├── pdf_report.py            # PDF report generator
-│   └── display.py               # Waveshare display
+│   ├── display.py               # Waveshare display
+│   ├── safety.py                # SSH-lockout protection (SSHGuard, Preflight)
+│   ├── secure_io.py             # Secure tempfile + input validation helpers
+│   └── config_loader.py         # config.json + .local overlay merge
 ├── web/
 │   ├── app.py                   # Flask web server
 │   └── templates/

@@ -94,13 +94,13 @@ class PenDonn:
         # Initialize WiFi scanner
         logger.info("Initializing WiFi scanner...")
         from core.wifi_scanner import WiFiScanner
-        self.wifi_monitor = WiFiScanner(self.config, self.db)
+        self.wifi_scanner = WiFiScanner(self.config, self.db)
         
         logger.info("Initializing password cracker...")
-        self.cracker = PasswordCracker(self.config, self.db, self.wifi_monitor)
+        self.cracker = PasswordCracker(self.config, self.db, self.wifi_scanner)
         
         logger.info("Initializing network enumerator...")
-        self.enumerator = NetworkEnumerator(self.config, self.db, self.plugin_manager, self.wifi_monitor)
+        self.enumerator = NetworkEnumerator(self.config, self.db, self.plugin_manager, self.wifi_scanner)
         
         # Initialize display (with protection against crashes)
         if self.config['display']['enabled']:
@@ -133,7 +133,7 @@ class PenDonn:
         self.running = True
         
         # Start modules
-        self.wifi_monitor.start()
+        self.wifi_scanner.start()
         self.cracker.start()
         self.enumerator.start()
         
@@ -162,8 +162,8 @@ class PenDonn:
         self.running = False
         
         # Stop modules
-        if self.wifi_monitor:
-            self.wifi_monitor.stop()
+        if self.wifi_scanner:
+            self.wifi_scanner.stop()
         
         if self.cracker:
             self.cracker.stop()
