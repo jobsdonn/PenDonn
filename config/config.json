@@ -1,4 +1,5 @@
 {
+  "_README": "Default PenDonn config. Empty MACs let interface_manager fall back to interface NAMES (less reliable across reboots — set monitor_mac/attack_mac/management_mac after running scripts/detect-wifi-adapters.sh). Empty secret_key triggers a per-startup random secret (sessions reset on restart) — set a persistent value via the installer or run web/app.py once to generate config.json.local. See config/config.example.json for an annotated reference.",
   "system": {
     "name": "PenDonn",
     "version": "1.0.0",
@@ -6,24 +7,25 @@
     "log_level": "INFO"
   },
   "wifi": {
-    "monitor_interface": "wlan0",
-    "attack_interface": "wlan1",
-    "management_interface": "wlan2",
-    "monitor_mac": "00:11:22:33:44:55",
-    "attack_mac": "00:11:22:33:44:56",
-    "management_mac": "00:11:22:33:44:57",
+    "monitor_interface": "wlan1",
+    "attack_interface": "wlan2",
+    "management_interface": "wlan0",
+    "monitor_mac": "",
+    "attack_mac": "",
+    "management_mac": "",
     "single_interface_mode": false,
     "allow_management_wifi": false,
     "channel_hop_interval": 2,
     "handshake_timeout": 300,
-    "comment": "Interface names can swap on reboot. MAC addresses are used for reliable detection. Set single_interface_mode=true for RPi Zero 2 W with only onboard WiFi. WARNING: You will lose SSH connection!"
+    "_comment": "Interface names can swap on reboot — populate monitor_mac/attack_mac/management_mac for stable detection. management_interface MUST point to whichever iface carries SSH; safety preflight will refuse to start otherwise."
   },
   "whitelist": {
-    "ssids": ["LinusTest", "LinusTest5"]
+    "ssids": [],
+    "_comment": "SSIDs in this list are NEVER targeted (no scanning, no deauth, no handshake capture, no enumeration). Add your home/work networks here BEFORE first run. Empty list = nothing protected."
   },
   "cracking": {
     "enabled": true,
-    "engines": ["aircrack-ng", "hashcat", "john"],
+    "engines": ["hashcat", "john"],
     "wordlist_path": "/usr/share/wordlists/rockyou.txt",
     "auto_start_cracking": true,
     "max_concurrent_cracks": 2,
@@ -34,10 +36,7 @@
     "brute_force": false,
     "brute_max_length": 8,
     "session_prefix": "pendonn",
-    "extra_wordlists": [
-      "/usr/share/wordlists/rockyou.txt",
-      "./test_data/mini_wordlist.txt"
-    ]
+    "extra_wordlists": []
   },
   "enumeration": {
     "enabled": true,
@@ -56,14 +55,15 @@
     "backup_on_export": true
   },
   "web": {
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "port": 8080,
-    "secret_key": "CHANGE_THIS_SECRET_KEY_IN_PRODUCTION"
+    "secret_key": "",
+    "_comment": "host defaults to 127.0.0.1 (loopback only). Change to 0.0.0.0 to expose on the LAN ONLY if you have authentication configured (basic_auth section, set in installer). Empty secret_key triggers ephemeral per-startup secret with a loud warning."
   },
   "display": {
     "enabled": true,
     "type": "waveshare_v4",
-    "refresh_interval": 2,
+    "refresh_interval": 30,
     "brightness": 80
   },
   "safety": {

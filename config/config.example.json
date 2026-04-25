@@ -1,0 +1,102 @@
+{
+  "_README": [
+    "Annotated reference config. Copy to config.json and edit. The actual",
+    "config.json shipped with the repo is a stripped-down safe default —",
+    "this file documents every option.",
+    "",
+    "Fields starting with _ are documentation only and ignored by the loader.",
+    "Field-level comments are inline as `_comment` keys."
+  ],
+
+  "system": {
+    "name": "PenDonn",
+    "version": "1.0.0",
+    "auto_start": true,
+    "log_level": "INFO",
+    "_comment": "log_level: DEBUG | INFO | WARNING | ERROR. INFO is the right default."
+  },
+
+  "wifi": {
+    "_comment": "Two physical paths are supported: dual external adapters (production), or single onboard adapter (RPi Zero 2 W only — see config.rpi_zero2w.json). Interface NAMES are unreliable across reboots when USB adapters swap; populate the *_mac fields after running scripts/detect-wifi-adapters.sh.",
+    "monitor_interface": "wlan1",
+    "attack_interface": "wlan2",
+    "management_interface": "wlan0",
+    "monitor_mac": "aa:bb:cc:dd:ee:01",
+    "attack_mac": "aa:bb:cc:dd:ee:02",
+    "management_mac": "aa:bb:cc:dd:ee:03",
+    "single_interface_mode": false,
+    "allow_management_wifi": false,
+    "channel_hop_interval": 2,
+    "handshake_timeout": 300
+  },
+
+  "whitelist": {
+    "_comment": "Whitelisted SSIDs are NEVER attacked. Add your own networks here, plus any in-scope networks the customer has explicitly excluded.",
+    "ssids": ["MyHomeWiFi", "MyOfficeWiFi", "Customer-Excluded-AP"]
+  },
+
+  "cracking": {
+    "_comment": "Modern flow is hcxdumptool (capture, in wifi_scanner) -> hcxpcapngtool (convert) -> hashcat -m 22000. aircrack-ng is kept available but is essentially WEP-only in 2026. john is useful as a generic cracker for non-WiFi hashes from enum plugins.",
+    "enabled": true,
+    "engines": ["hashcat", "john", "aircrack-ng"],
+    "wordlist_path": "/usr/share/wordlists/rockyou.txt",
+    "auto_start_cracking": true,
+    "max_concurrent_cracks": 2,
+    "john_format": "wpapsk",
+    "hashcat_mode": 22000,
+    "hashcat_rules_dir": "./rules",
+    "use_rules": true,
+    "brute_force": false,
+    "brute_max_length": 8,
+    "session_prefix": "pendonn",
+    "extra_wordlists": [
+      "/usr/share/wordlists/seclists/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt"
+    ]
+  },
+
+  "enumeration": {
+    "_comment": "Runs nmap + plugins against networks once cracked. nmap_timing: T0 (paranoid) ... T5 (insane). T4 is reasonable on a stable wired-target. Use T2 if you need to be quiet.",
+    "enabled": true,
+    "auto_scan_on_crack": true,
+    "nmap_timing": "T4",
+    "port_scan_range": "1-10000",
+    "scan_timeout": 3600
+  },
+
+  "plugins": {
+    "_comment": "Plugins under ./plugins/ are loaded dynamically. SECURITY: any .py in this dir is exec'd as root by plugin_manager — keep the dir 0700 root-owned. See docs/SAFETY.md.",
+    "enabled": true,
+    "directory": "./plugins",
+    "auto_load": true
+  },
+
+  "database": {
+    "path": "./data/pendonn.db",
+    "backup_on_export": true
+  },
+
+  "web": {
+    "_comment": "host: 127.0.0.1 = loopback only (recommended). 0.0.0.0 = expose on LAN — only if basic_auth is enabled. secret_key: leave empty to auto-generate (will warn on every restart); installer will populate config.json.local with a persistent value.",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "secret_key": ""
+  },
+
+  "display": {
+    "_comment": "type: waveshare_v4 (2.13in 250x122 e-paper, RPi 4/5) | ssd1306 (128x64 OLED, RPi Zero 2W) | none. refresh_interval below 30s causes ghosting/burn-in on e-paper.",
+    "enabled": true,
+    "type": "waveshare_v4",
+    "refresh_interval": 30,
+    "brightness": 80
+  },
+
+  "safety": {
+    "_comment": "SSH-lockout protection. Defaults are intentionally strict — see docs/SAFETY.md before disabling. armed_override=true is required (and acceptable) for RPi Zero 2 W single-interface mode where you've accepted SSH loss.",
+    "enabled": true,
+    "block_monitor_on_ssh_iface": true,
+    "block_monitor_on_management": true,
+    "block_kill_management_supplicant": true,
+    "armed_override": false,
+    "explicit_safe_ifaces": []
+  }
+}

@@ -4,6 +4,7 @@ Flask web application for controlling the system
 """
 
 import os
+import secrets
 import sys
 import json
 import logging
@@ -34,7 +35,19 @@ config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config',
 with open(config_path, 'r') as f:
     config = json.load(f)
 
-app.config['SECRET_KEY'] = config['web']['secret_key']
+# Resolve Flask secret_key. Empty / placeholder values trigger an
+# ephemeral per-startup secret with a loud warning. Persistent secret
+# generation lives in the installer (writes to config.json.local).
+_secret = (config.get('web', {}) or {}).get('secret_key') or ''
+_PLACEHOLDER_SECRETS = {'', 'CHANGE_THIS_SECRET_KEY_IN_PRODUCTION'}
+if _secret in _PLACEHOLDER_SECRETS:
+    logger.warning(
+        "web.secret_key is unset or placeholder — generating an ephemeral "
+        "per-startup secret. Sessions will reset on every restart. "
+        "Run the installer or set web.secret_key in config to fix."
+    )
+    _secret = secrets.token_hex(32)
+app.config['SECRET_KEY'] = _secret
 
 # Initialize database
 db = Database(config['database']['path'])
