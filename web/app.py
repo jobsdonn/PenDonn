@@ -4,18 +4,24 @@ Flask web application for controlling the system
 """
 
 import os
-import secrets
 import sys
 import json
 import logging
 import subprocess
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
+from functools import wraps
+
+from flask import (
+    Flask, render_template, request, jsonify, send_file, Response,
+    stream_with_context,
+)
 from flask_cors import CORS
+from werkzeug.security import check_password_hash, generate_password_hash
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core.config_loader import ensure_persistent_secret, load_config
 from core.database import Database
 from core.pdf_report import PDFReport
 
@@ -30,27 +36,93 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
-# Load configuration
+# Load configuration (config.json + optional config.json.local overlay).
 config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'config.json')
-with open(config_path, 'r') as f:
-    config = json.load(f)
+config = load_config(config_path)
 
-# Resolve Flask secret_key. Empty / placeholder values trigger an
-# ephemeral per-startup secret with a loud warning. Persistent secret
-# generation lives in the installer (writes to config.json.local).
-_secret = (config.get('web', {}) or {}).get('secret_key') or ''
-_PLACEHOLDER_SECRETS = {'', 'CHANGE_THIS_SECRET_KEY_IN_PRODUCTION'}
-if _secret in _PLACEHOLDER_SECRETS:
-    logger.warning(
-        "web.secret_key is unset or placeholder — generating an ephemeral "
-        "per-startup secret. Sessions will reset on every restart. "
-        "Run the installer or set web.secret_key in config to fix."
-    )
-    _secret = secrets.token_hex(32)
-app.config['SECRET_KEY'] = _secret
+# Resolve Flask secret_key. Empty / placeholder values trigger generation
+# of a fresh secret persisted to config.json.local (chmod 0600). Subsequent
+# starts read it back from .local — sessions survive restarts.
+app.config['SECRET_KEY'] = ensure_persistent_secret(config, config_path)
 
 # Initialize database
 db = Database(config['database']['path'])
+
+
+# ---------------------------------------------------------------------------
+# Basic Auth
+#
+# Off by default for backward compat (loopback-only is the safe default).
+# The bind-safety check below refuses to start with host=0.0.0.0 unless
+# auth is enabled. Configure via config.json.local:
+#
+#     "web": {
+#       "basic_auth": {
+#         "enabled": true,
+#         "username": "linus",
+#         "password_hash": "scrypt:..." or "pbkdf2:..."
+#       }
+#     }
+#
+# Generate a hash with:  python web/app.py --hash-password
+# Falls back to checking a plaintext "password" field with a deprecation
+# warning, so existing operators don't get locked out by the upgrade.
+# ---------------------------------------------------------------------------
+
+_auth_cfg = (config.get('web', {}) or {}).get('basic_auth', {}) or {}
+_AUTH_ENABLED = bool(_auth_cfg.get('enabled', False))
+_AUTH_USER = _auth_cfg.get('username') or ''
+_AUTH_HASH = _auth_cfg.get('password_hash') or ''
+_AUTH_PLAINTEXT = _auth_cfg.get('password') or ''
+if _AUTH_ENABLED and not _AUTH_HASH and _AUTH_PLAINTEXT:
+    logger.warning(
+        "web.basic_auth.password is set in PLAINTEXT — generate a hash with "
+        "`python web/app.py --hash-password` and store it as password_hash "
+        "in config.json.local instead. Plaintext support will be removed."
+    )
+
+# Routes that must NEVER require auth (operator can lock themselves out
+# of /api/config otherwise; captive-portal endpoints serve evil-twin
+# victims who obviously can't authenticate).
+_AUTH_EXEMPT_PREFIXES = ('/captive/', '/static/')
+_AUTH_EXEMPT_PATHS = {'/health', '/favicon.ico'}
+
+
+def _check_basic_auth_credentials(username: str, password: str) -> bool:
+    """Constant-time-ish credential check. Returns True iff valid."""
+    if not _AUTH_ENABLED:
+        return True
+    if not username or username != _AUTH_USER:
+        return False
+    if _AUTH_HASH:
+        try:
+            return check_password_hash(_AUTH_HASH, password)
+        except (ValueError, TypeError) as e:
+            logger.error("Bad password_hash format: %s", e)
+            return False
+    if _AUTH_PLAINTEXT:
+        # Constant-time comparison via secrets.compare_digest
+        import secrets as _s
+        return _s.compare_digest(password, _AUTH_PLAINTEXT)
+    return False
+
+
+@app.before_request
+def _enforce_basic_auth():
+    if not _AUTH_ENABLED:
+        return None
+    path = request.path or ''
+    if path in _AUTH_EXEMPT_PATHS:
+        return None
+    if any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
+        return None
+    auth = request.authorization
+    if auth and _check_basic_auth_credentials(auth.username or '', auth.password or ''):
+        return None
+    return Response(
+        'Authentication required.\n', 401,
+        {'WWW-Authenticate': 'Basic realm="PenDonn"'},
+    )
 
 
 @app.route('/')
@@ -507,9 +579,72 @@ def get_logs():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _hash_password_cli() -> int:
+    """Interactive helper: prompt for a password and print a werkzeug hash.
+
+    Operator copies the printed line into config.json.local under
+    web.basic_auth.password_hash. We never echo the password and never
+    write the hash to disk on behalf of the operator — they paste it
+    explicitly so they're aware of where the secret lives.
+    """
+    import getpass
+    pw = getpass.getpass("Password: ")
+    pw2 = getpass.getpass("Confirm:  ")
+    if pw != pw2:
+        print("Passwords don't match.", file=sys.stderr)
+        return 1
+    if len(pw) < 8:
+        print("Refusing: password must be at least 8 characters.", file=sys.stderr)
+        return 1
+    print(generate_password_hash(pw))
+    print(
+        "\nAdd to config/config.json.local:\n"
+        '  "web": { "basic_auth": { "enabled": true, '
+        '"username": "<your-username>", "password_hash": "<the line above>" } }',
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _refuse_unauth_lan_exposure(host: str) -> None:
+    """Exit if host=0.0.0.0 (LAN-exposed) and basic_auth is disabled.
+
+    Defends against the most common foot-gun: operator flips host to
+    0.0.0.0 to hit the dashboard from their laptop, forgets to enable auth,
+    and now /api/database/reset and /api/service/stop are reachable from
+    every device on the network. Loopback-only is fine without auth.
+    """
+    if host in ('127.0.0.1', 'localhost', '::1'):
+        return
+    if _AUTH_ENABLED:
+        logger.warning(
+            "Web server bound to %s — make sure basic_auth credentials "
+            "are strong; CSRF protection is NOT enabled in this UI yet.",
+            host,
+        )
+        return
+    logger.error("=" * 60)
+    logger.error("REFUSING TO START: web.host=%s but basic_auth is disabled.", host)
+    logger.error("Either:")
+    logger.error("  1) set web.host to 127.0.0.1 (loopback only), OR")
+    logger.error("  2) configure web.basic_auth.{enabled,username,password_hash}")
+    logger.error("     in config.json.local — generate a hash with:")
+    logger.error("         python web/app.py --hash-password")
+    logger.error("=" * 60)
+    sys.exit(2)
+
+
 if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == '--hash-password':
+        sys.exit(_hash_password_cli())
+
     host = config['web']['host']
     port = config['web']['port']
-    
-    logger.info(f"Starting PenDonn Web Interface on {host}:{port}")
+    _refuse_unauth_lan_exposure(host)
+
+    auth_state = "enabled" if _AUTH_ENABLED else "DISABLED (loopback-only ok)"
+    logger.info(
+        "Starting PenDonn Web Interface on %s:%s (basic_auth: %s)",
+        host, port, auth_state,
+    )
     app.run(host=host, port=port, debug=False)

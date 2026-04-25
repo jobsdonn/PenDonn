@@ -12,6 +12,7 @@ import logging
 import time
 from datetime import datetime
 
+from core.config_loader import load_config
 from core.database import Database
 from core.plugin_manager import PluginManager
 from core.enumerator import NetworkEnumerator
@@ -54,10 +55,10 @@ class PenDonn:
         logger.info("PenDonn - Automated Penetration Testing System")
         logger.info("=" * 60)
         
-        # Load configuration
+        # Load configuration (config.json + optional config.json.local overlay).
+        # See core/config_loader.py for the merge semantics.
         logger.info(f"Loading configuration from {config_path}")
-        with open(config_path, 'r') as f:
-            self.config = json.load(f)
+        self.config = load_config(config_path)
         
         logger.info(f"PenDonn v{self.config['system']['version']}")
 
@@ -218,9 +219,8 @@ def main():
     
     # Check if running as root (skip in debug mode)
     config_path = os.path.join(os.path.dirname(__file__), 'config', config_file)
-    with open(config_path, 'r') as f:
-        config = json.load(f)
-    
+    config = load_config(config_path)
+
     debug_mode = config.get('debug', {}).get('enabled', False)
     
     if not debug_mode and os.name != 'nt':  # Only check on Unix systems, not Windows
