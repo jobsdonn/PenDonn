@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Handshakes — PenDonn{% endblock %}
+{% block page_title %}Handshakes{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+    <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <div class="flex gap-1 bg-slate-100 dark:bg-ink-800 p-1 rounded-lg text-sm">
+            {% for k, label in [('all', 'All'), ('pending', 'Pending'), ('cracked', 'Cracked'), ('failed', 'Failed')] %}
+            <a hx-get="/partials/handshakes?status={{ k }}"
+               hx-target="#handshakes-table"
+               hx-swap="outerHTML"
+               href="/handshakes?status={{ k }}"
+               class="px-3 py-1 rounded transition
+                      {{ 'bg-white dark:bg-ink-700 text-slate-900 dark:text-white shadow-sm' if status == k else 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white' }}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+        <span hx-get="/partials/handshakes?status={{ status }}"
+              hx-target="#handshakes-table"
+              hx-swap="outerHTML"
+              hx-trigger="every 10s"
+              class="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+            <span class="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
+            Live (10s)
+        </span>
+    </div>
+
+    {% include "partials/handshakes_table.html" %}
+</div>
+{% endblock %}

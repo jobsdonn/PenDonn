@@ -246,5 +246,93 @@ class TestNetworksPage(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
 
 
+@unittest.skipUnless(HAVE_FASTAPI, "fastapi not installed")
+class TestHandshakesAndPasswordsPages(unittest.TestCase):
+    """Handshakes + cracked passwords tables — render, filter, file-missing handling."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.app, cls.config_path, cls.db_path = _build_app_fixture(cls.tmp.name)
+        db = cls.app.state.db
+
+        # Need a network for the FK; add_handshake takes network_id
+        net_id = db.add_network("TargetNet", "AA:BB:CC:DD:EE:01", 6, "WPA2", -50)
+        db.add_network("OtherNet", "AA:BB:CC:DD:EE:02", 11, "WPA2", -65)
+        other_id = (db.get_network_by_bssid("AA:BB:CC:DD:EE:02") or {}).get("id")
+
+        # Pending: file path that doesn't exist on disk → file_exists=False
+        cls.h_pending = db.add_handshake(
+            net_id, "AA:BB:CC:DD:EE:01", "TargetNet",
+            "/nonexistent/handshake.cap", "pending",
+        )
+        # Cracked: real file we just create
+        real_file = os.path.join(cls.tmp.name, "real_capture.cap")
+        with open(real_file, "wb") as f:
+            f.write(b"\x00" * 5000)  # ~5KB
+        cls.h_cracked = db.add_handshake(
+            other_id, "AA:BB:CC:DD:EE:02", "OtherNet", real_file, "cracked",
+        )
+        db.add_cracked_password(cls.h_cracked, "OtherNet", "AA:BB:CC:DD:EE:02",
+                                "supersecret123", "hashcat", 42)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.app.state.db.close_all()
+        except Exception:
+            pass
+        try:
+            cls.tmp.cleanup()
+        except (PermissionError, OSError):
+            pass
+
+    def setUp(self):
+        self.client = TestClient(self.app)
+        self.client.post(
+            "/login",
+            data={"username": "tester", "password": "hunter2-correct-horse", "next": "/"},
+            follow_redirects=False,
+        )
+
+    # --- handshakes ---------------------------------------------------------
+
+    def test_handshakes_page_lists_all(self):
+        r = self.client.get("/handshakes")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("TargetNet", r.text)
+        self.assertIn("OtherNet", r.text)
+        # Status badges
+        self.assertIn("pending", r.text)
+        self.assertIn("cracked", r.text)
+
+    def test_handshakes_filter_by_status(self):
+        r = self.client.get("/partials/handshakes?status=pending")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("TargetNet", r.text)
+        self.assertNotIn("OtherNet", r.text)
+
+    def test_handshakes_show_file_missing_label(self):
+        r = self.client.get("/handshakes")
+        self.assertIn("file missing", r.text)  # for the pending one
+
+    def test_handshakes_show_file_size(self):
+        r = self.client.get("/handshakes")
+        # 5000 bytes → 4.9K
+        self.assertIn("4.9K", r.text)
+
+    # --- passwords ----------------------------------------------------------
+
+    def test_passwords_page_lists_cracked(self):
+        r = self.client.get("/passwords")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("OtherNet", r.text)
+        # Plaintext password is in the rendered HTML (revealed via JS)
+        self.assertIn("supersecret123", r.text)
+        # Engine + crack time formatted
+        self.assertIn("hashcat", r.text)
+        self.assertIn("42s", r.text)
+
+
 if __name__ == "__main__":
     unittest.main()

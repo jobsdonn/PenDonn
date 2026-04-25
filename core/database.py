@@ -263,6 +263,23 @@ class Database:
         cursor.execute('SELECT * FROM handshakes WHERE bssid = ?', (bssid,))
         handshakes = [dict(row) for row in cursor.fetchall()]
         return handshakes
+
+    def get_all_handshakes(self, status: Optional[str] = None) -> List[Dict]:
+        """Get all handshakes, newest first, optionally filtered by status.
+
+        Note: schema column is `capture_date` (singular). Don't rename it
+        — the existing data on deployed Pis would migrate badly.
+        """
+        conn = self.connect()
+        cursor = conn.cursor()
+        if status:
+            cursor.execute(
+                'SELECT * FROM handshakes WHERE status = ? ORDER BY capture_date DESC',
+                (status,),
+            )
+        else:
+            cursor.execute('SELECT * FROM handshakes ORDER BY capture_date DESC')
+        return [dict(row) for row in cursor.fetchall()]
     
     def update_handshake_status(self, handshake_id: int, status: str):
         """Update handshake processing status"""

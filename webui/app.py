@@ -26,6 +26,7 @@ from core.database import Database
 
 from webui import auth as auth_mod
 from webui.routes import dashboard as dashboard_routes
+from webui.routes import handshakes as handshakes_routes
 from webui.routes import networks as networks_routes
 
 logger = logging.getLogger("pendonn.webui")
@@ -122,3 +123,4 @@ def logout(request: Request):
 
 app.include_router(dashboard_routes.router)
 app.include_router(networks_routes.router)
+app.include_router(handshakes_routes.router)

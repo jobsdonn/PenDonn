@@ -1,0 +1,71 @@
+<div id="handshakes-table" class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl overflow-hidden">
+{% if handshakes %}
+<div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+        <thead class="bg-slate-50 dark:bg-ink-800/60 text-left text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <tr>
+                <th class="px-4 py-3 font-medium">SSID</th>
+                <th class="px-4 py-3 font-medium">BSSID</th>
+                <th class="px-4 py-3 font-medium">Status</th>
+                <th class="px-4 py-3 font-medium">Captured</th>
+                <th class="px-4 py-3 font-medium">File</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200 dark:divide-ink-700">
+            {% for h in handshakes %}
+            <tr class="hover:bg-slate-50 dark:hover:bg-ink-800/40 transition">
+                <td class="px-4 py-2.5 font-medium">
+                    <div class="truncate max-w-[16rem]">{{ h.ssid or '(hidden)' }}</div>
+                </td>
+                <td class="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-400">{{ h.bssid }}</td>
+                <td class="px-4 py-2.5">
+                    {% set st = (h.status or 'pending')|lower %}
+                    {% if st == 'cracked' %}{% set tone = 'emerald' %}
+                    {% elif st == 'pending' %}{% set tone = 'amber' %}
+                    {% elif st == 'cracking' %}{% set tone = 'sky' %}
+                    {% elif st == 'failed' %}{% set tone = 'rose' %}
+                    {% else %}{% set tone = 'slate' %}{% endif %}
+                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium
+                        {% if tone == 'emerald' %}bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300
+                        {% elif tone == 'amber' %}bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300
+                        {% elif tone == 'sky' %}bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300
+                        {% elif tone == 'rose' %}bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300
+                        {% else %}bg-slate-100 text-slate-600 dark:bg-ink-800 dark:text-slate-300{% endif %}">
+                        {% if st == 'cracking' %}<span class="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>{% endif %}
+                        {{ st }}
+                    </span>
+                </td>
+                <td class="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                    {{ h.capture_date|string if h.capture_date else '—' }}
+                </td>
+                <td class="px-4 py-2.5">
+                    {% if h.file_exists %}
+                        {% set fname = (h.file_path or '')|replace('\\', '/') %}
+                        {% set basename = fname.rsplit('/', 1)[-1] if '/' in fname else fname %}
+                        <div class="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <span class="font-mono truncate max-w-[14rem]" title="{{ h.file_path }}">{{ basename or '—' }}</span>
+                            <span class="tabular-nums text-slate-500 dark:text-slate-500">{{ '%.1fK'|format(h.file_size_bytes / 1024) if h.file_size_bytes < 1048576 else '%.1fM'|format(h.file_size_bytes / 1048576) }}</span>
+                        </div>
+                    {% else %}
+                        <span class="text-xs text-rose-600 dark:text-rose-400">file missing</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<div class="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-ink-700">
+    {{ handshakes|length }} handshake{{ 's' if handshakes|length != 1 }}
+</div>
+{% else %}
+<div class="px-6 py-16 text-center">
+    <svg class="w-10 h-10 mx-auto text-slate-300 dark:text-ink-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <h3 class="mt-3 font-medium">No handshakes {{ ('with status \'' + status + '\'') if status != 'all' else 'yet' }}</h3>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+        Handshakes appear here as soon as the WiFi scanner captures one.
+    </p>
+</div>
+{% endif %}
+</div>
