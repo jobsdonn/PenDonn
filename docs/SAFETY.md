@@ -115,6 +115,51 @@ If you change `core/safety.py`, run these tests before committing.
 
 ---
 
+## Plugin loader trust model
+
+`core/plugin_manager.py` discovers `.py` files under `plugins/` and runs
+them via `importlib.util.spec_from_file_location` + `exec_module`. PenDonn
+typically runs as root, so a plugin file = root code execution.
+
+Two layers of protection close the most common accidents:
+
+**Layer 1 — installer**
+`scripts/install.sh` (and the legacy top-level `install.sh`) runs:
+
+```
+chown -R root:root /opt/pendonn/plugins
+chmod 700           /opt/pendonn/plugins
+find ... -type d -exec chmod 700 {} \;
+find ... -type f -exec chmod 600 {} \;
+```
+
+After installation, only root can read or write under `plugins/`. An
+operator who SSHes in as a non-root user cannot drop a plugin without
+sudo.
+
+**Layer 2 — loader-side ownership/mode check**
+`core/plugin_manager._check_plugin_file_safety()` runs before each
+`exec_module` call and refuses if:
+
+- The plugin file or directory is **world-writable** (`o+w`) — fatal.
+- The plugin file is **owned by a UID that isn't root or our effective UID** — fatal.
+- The plugin file is **group-writable** — warning only (groups vary
+  per-deployment; warning lets you spot it but doesn't break a `pendonn`
+  shared dev group setup).
+
+If you need to bypass this for a known-good reason (e.g. you're
+developing plugins as a non-root user inside a VM), set:
+
+```json
+"safety": {
+  "plugin_loader": {
+    "allow_insecure_files": true
+  }
+}
+```
+
+Logs a `WARNING` at every load. Not for production.
+
 ## Adopting the guard in existing modules (Phase 1 work)
 
 Right now `core/safety.py` exists but no PenDonn module calls into it yet. That migration happens in Phase 1. The pattern is:

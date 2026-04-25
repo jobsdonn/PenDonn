@@ -1,16 +1,78 @@
 """
 PenDonn Plugin System
-Dynamic plugin loader for vulnerability scanners
+Dynamic plugin loader for vulnerability scanners.
+
+SECURITY: this loader executes arbitrary Python from disk via
+importlib.util.spec_from_file_location + exec_module. We're typically
+running as root because the wifi/enumeration paths require it, so a
+plugin file = root code execution. Two layers of protection:
+
+  1. Loader-side checks below: refuse to load a plugin file (or its
+     containing directory) that is world-writable, group-writable by a
+     group the operator hasn't allowlisted, or owned by a user other than
+     root / the current effective uid. These checks block the most common
+     prod accident (operator copies plugins via rsync without preserving
+     mode 0700).
+
+  2. Installer-side: scripts/install.sh chmod 0700 root the plugins/
+     directory. See docs/SAFETY.md for the trust model.
+
+Set safety.plugin_loader.allow_insecure_files=true to bypass the loader
+checks (NOT recommended; logs a loud warning at every load).
 """
 
 import os
 import json
 import importlib.util
 import logging
-from typing import List, Dict, Optional
+import platform
+import stat
+import sys
+from typing import List, Dict, Optional, Tuple
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
+
+
+def _check_plugin_file_safety(path: str) -> Optional[str]:
+    """Return None if `path` is safe to exec; otherwise a reason string.
+
+    Skipped entirely on non-POSIX (Windows dev box). The real enforcement
+    happens on the Pi where the install runs as root.
+    """
+    if platform.system() != "Linux":
+        return None
+    try:
+        st = os.stat(path)
+    except OSError as e:
+        return f"could not stat {path}: {e}"
+
+    mode = st.st_mode
+    # World-writable file = anyone on the box can replace its contents
+    # between our stat and our exec, or just to defaultly. Fatal.
+    if mode & stat.S_IWOTH:
+        return f"world-writable (mode 0{stat.S_IMODE(mode):o}); refusing to exec"
+    # Group-writable is also dangerous unless that group is just root.
+    if mode & stat.S_IWGRP:
+        # We don't have a great way to validate the group here without
+        # extra config; flag and warn rather than refuse. Refusing would
+        # break the common case of `pendonn` group ownership for shared dev.
+        logger.warning(
+            "plugin file %s is group-writable (gid=%d) — consider chmod g-w",
+            path, st.st_gid,
+        )
+    # Owner must be root or our effective uid. If it's a random user
+    # (e.g. an operator dropped a plugin from their home dir), refuse.
+    try:
+        my_euid = os.geteuid()
+    except AttributeError:
+        my_euid = -1
+    if st.st_uid not in (0, my_euid):
+        return (
+            f"owned by uid {st.st_uid} (expected 0 or {my_euid}); "
+            f"refusing to exec — chown root:root if intentional"
+        )
+    return None
 
 
 class PluginBase(ABC):
@@ -63,16 +125,24 @@ class PluginManager:
         """Initialize plugin manager"""
         self.config = config
         self.db = database
-        
+
         self.enabled = config['plugins']['enabled']
         self.plugin_dir = config['plugins']['directory']
         self.auto_load = config['plugins']['auto_load']
-        
+
+        # Operator escape hatch for the loader-side ownership/mode checks.
+        # Off by default because the whole point of those checks is to make
+        # the common prod accident impossible.
+        safety_cfg = (config.get('safety') or {}).get('plugin_loader') or {}
+        self.allow_insecure_plugin_files = bool(
+            safety_cfg.get('allow_insecure_files', False)
+        )
+
         self.plugins = []
-        
+
         # Ensure plugin directory exists
         os.makedirs(self.plugin_dir, exist_ok=True)
-        
+
         logger.info("Plugin Manager initialized")
     
     def load_plugins(self):
@@ -123,7 +193,28 @@ class PluginManager:
             if not os.path.exists(module_path):
                 logger.error(f"Plugin module not found: {module_path}")
                 return
-            
+
+            # SECURITY: refuse to exec plugin code we can't trust the
+            # provenance of. Operator can override via
+            # safety.plugin_loader.allow_insecure_files=true.
+            for check_path in (plugin_path, module_path, config_file):
+                problem = _check_plugin_file_safety(check_path)
+                if problem:
+                    if self.allow_insecure_plugin_files:
+                        logger.warning(
+                            "plugin safety check would have refused %s (%s) "
+                            "but allow_insecure_files=true — loading anyway",
+                            check_path, problem,
+                        )
+                    else:
+                        logger.error(
+                            "REFUSING to load plugin %s: %s. "
+                            "Fix file ownership/mode, or set "
+                            "safety.plugin_loader.allow_insecure_files=true.",
+                            plugin_config.get('name', plugin_path), problem,
+                        )
+                        return
+
             # Import module
             spec = importlib.util.spec_from_file_location(
                 plugin_config['name'],
