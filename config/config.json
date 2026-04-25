@@ -65,5 +65,14 @@
     "type": "waveshare_v4",
     "refresh_interval": 2,
     "brightness": 80
+  },
+  "safety": {
+    "_comment": "SSH-lockout protection. Defaults are intentionally strict. See docs/SAFETY.md before changing anything here.",
+    "enabled": true,
+    "block_monitor_on_ssh_iface": true,
+    "block_monitor_on_management": true,
+    "block_kill_management_supplicant": true,
+    "armed_override": false,
+    "explicit_safe_ifaces": []
   }
 }

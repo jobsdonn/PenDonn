@@ -1,21 +1,6 @@
-"""
-PenDonn Core Module
-Contains all core functionality for the PenDonn system
-"""
+"""PenDonn core package.
 
-from .database import Database
-from .wifi_monitor import WiFiMonitor
-from .cracker import PasswordCracker
-from .enumerator import NetworkEnumerator
-from .plugin_manager import PluginManager, PluginBase
-from .display import Display
-
-__all__ = [
-    'Database',
-    'WiFiMonitor',
-    'PasswordCracker',
-    'NetworkEnumerator',
-    'PluginManager',
-    'PluginBase',
-    'Display'
-]
+Submodules are imported on demand — `from core.<module> import <name>` —
+rather than eagerly here, so that importing one submodule (e.g. core.safety,
+core.database) does not pull in optional heavy deps like scapy or RPi.GPIO.
+"""

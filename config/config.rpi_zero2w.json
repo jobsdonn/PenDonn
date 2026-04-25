@@ -77,5 +77,14 @@
     "max_threads": 2,
     "buffer_size": 1024,
     "low_memory_mode": true
+  },
+  "safety": {
+    "_comment": "armed_override is REQUIRED on Zero 2W because single_interface_mode reuses wlan0 for everything; preflight would otherwise reject the duplicate iface assignment. By using this config you explicitly accept SSH loss the moment monitoring starts.",
+    "enabled": true,
+    "block_monitor_on_ssh_iface": true,
+    "block_monitor_on_management": true,
+    "block_kill_management_supplicant": true,
+    "armed_override": true,
+    "explicit_safe_ifaces": []
   }
 }
