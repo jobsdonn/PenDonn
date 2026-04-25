@@ -310,7 +310,13 @@ class WiFiScanner:
                 # from 2026-04-25). Cheap to re-check; loud failures otherwise.
                 os.makedirs(self.scan_dir, exist_ok=True)
 
-                # Run airodump-ng scan for 10 seconds
+                # Run airodump-ng scan for SCAN_WINDOW_SEC seconds.
+                # Default airodump channel-hop is ~1s/channel; 2.4G has 13
+                # channels, 5G has 25+. A 10s window only hits ~10 channels
+                # so anything on CH 11+ or 5GHz is invisible. Bumped to 30s
+                # so a typical neighborhood gets fully enumerated each pass.
+                # The active_scan_process is still aborted immediately when
+                # enumeration starts (see the per-second check below).
                 scan_file = os.path.join(self.scan_dir, f"scan_{int(time.time())}")
 
                 logger.debug(f"Running 10-second scan on {self.interface}...")
@@ -332,8 +338,10 @@ class WiFiScanner:
                     self.interface
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                # Let it scan for 10 seconds (check enumeration flag every second)
-                for _ in range(10):
+                # Let it scan for 30 seconds (check enumeration flag every second).
+                # See SCAN_WINDOW comment above.
+                SCAN_WINDOW_SEC = 30
+                for _ in range(SCAN_WINDOW_SEC):
                     time.sleep(1)
                     # If enumeration starts during scan, abort immediately
                     if self.enumeration_active and self.active_scan_process:
