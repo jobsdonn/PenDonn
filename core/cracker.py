@@ -399,7 +399,7 @@ class PasswordCracker:
                 logger.error(f"Capture file too small: {capture_file} ({os.path.getsize(capture_file)} bytes)")
                 return None
             
-            logger.info(f"Cracking with Hashcat: {ssid}\")")
+            logger.info(f"Cracking with Hashcat: {ssid}")
             
             # Convert to hashcat 22000 format
             hash_file = capture_file.replace('.cap', '.22000')

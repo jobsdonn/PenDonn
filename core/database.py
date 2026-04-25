@@ -392,7 +392,43 @@ class Database:
         
         vulns = [dict(row) for row in cursor.fetchall()]
         return vulns
-    
+
+    # System logs
+    def add_log(self, module: str, message: str, level: str = "INFO") -> int:
+        """Insert a row into system_logs.
+
+        Called from evil_twin and enumerator. Args match the order they pass:
+        (module, message, level). Returns the new row id.
+        """
+        with self._lock:
+            conn = self.connect()
+            cursor = conn.cursor()
+            cursor.execute(
+                'INSERT INTO system_logs (level, module, message) VALUES (?, ?, ?)',
+                (level, module, message),
+            )
+            row_id = cursor.lastrowid
+            conn.commit()
+            return row_id
+
+    def get_logs(self, level: Optional[str] = None, module: Optional[str] = None,
+                 limit: int = 200) -> List[Dict]:
+        """Read recent rows from system_logs, optionally filtered."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        query = 'SELECT * FROM system_logs WHERE 1=1'
+        params: List = []
+        if level:
+            query += ' AND level = ?'
+            params.append(level)
+        if module:
+            query += ' AND module = ?'
+            params.append(module)
+        query += ' ORDER BY timestamp DESC LIMIT ?'
+        params.append(limit)
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
     # Statistics
     def get_statistics(self) -> Dict:
         """Get overall system statistics"""
