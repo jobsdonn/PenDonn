@@ -5,26 +5,27 @@
 {% block content %}
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-    <!-- Whitelist editor -->
+    <!-- Allowlist editor (renamed from "whitelist" in Phase 2A — see docs/SAFETY.md) -->
     <section class="lg:col-span-2 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
         <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
-            <h2 class="font-semibold">Whitelisted SSIDs</h2>
+            <h2 class="font-semibold">Allowlist (in-scope SSIDs)</h2>
             <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                The WiFi scanner skips these networks entirely — no scanning, deauth, capture, or enumeration.
-                Add your own networks plus any in-scope APs the customer has explicitly excluded.
+                SSIDs that the daemon is allowed to attack: scan, deauth, capture handshakes,
+                attempt cracking, and enumerate post-association. Strict mode (default ON) means
+                <em>only</em> these SSIDs get touched — everything else is left alone.
             </p>
         </header>
         <div class="p-5 space-y-4">
-            <form hx-post="/partials/whitelist/add"
-                  hx-target="#whitelist"
+            <form hx-post="/partials/allowlist/add"
+                  hx-target="#allowlist"
                   hx-swap="outerHTML"
                   hx-on::after-request="if(event.detail.successful) this.reset()"
                   class="flex gap-2">
-                <input type="text" name="ssid" required maxlength="32" placeholder="e.g. My-Home-WiFi"
+                <input type="text" name="ssid" required maxlength="32" placeholder="e.g. Customer-Target-AP"
                        class="flex-1 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm">
                 <button type="submit" class="px-3 py-1.5 rounded-md bg-accent-deep text-white text-sm font-medium hover:bg-sky-600">Add</button>
             </form>
-            {% include "partials/whitelist.html" %}
+            {% include "partials/allowlist.html" %}
         </div>
     </section>
 

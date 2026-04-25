@@ -25,9 +25,10 @@
     "handshake_timeout": 300,
     "comment": "WARNING: single_interface_mode uses onboard WiFi (wlan0). You WILL lose SSH connection when monitoring starts. Ensure local access via HDMI+keyboard or enable auto-start on boot."
   },
-  "whitelist": {
-    "ssids": [],
-    "comment": "Add your own networks here for testing, e.g. ['MyTestNetwork', 'HomeWiFi']"
+  "allowlist": {
+    "_comment": "SSIDs the daemon is allowed to attack. With strict=true (default), only listed SSIDs get touched. Empty + strict=true = safe scan-only mode.",
+    "strict": true,
+    "ssids": []
   },
   "cracking": {
     "enabled": true,

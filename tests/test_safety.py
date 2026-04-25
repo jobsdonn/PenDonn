@@ -176,6 +176,43 @@ class TestPreflight(unittest.TestCase):
         self.assertTrue(result.ok)
 
 
+class TestPreflightTargeting(unittest.TestCase):
+    """Phase 2A: preflight refuses strict=false without armed_override."""
+
+    def test_strict_true_with_ssids_passes(self):
+        config = {"allowlist": {"strict": True, "ssids": ["Target1"]}}
+        result = preflight_check(config, INTERFACES, ssh_session=None)
+        self.assertTrue(result.ok)
+
+    def test_strict_true_with_empty_list_passes_with_info(self):
+        config = {"allowlist": {"strict": True, "ssids": []}}
+        result = preflight_check(config, INTERFACES, ssh_session=None)
+        self.assertTrue(result.ok)
+        self.assertTrue(any("passive scan" in i for i in result.info))
+
+    def test_strict_false_without_armed_override_is_FATAL(self):
+        config = {"allowlist": {"strict": False, "ssids": []}}
+        result = preflight_check(config, INTERFACES, ssh_session=None)
+        self.assertFalse(result.ok)
+        self.assertTrue(any("strict=false" in e for e in result.fatal_errors))
+
+    def test_strict_false_with_armed_override_is_warning_only(self):
+        config = {
+            "allowlist": {"strict": False, "ssids": []},
+            "safety": {"armed_override": True},
+        }
+        result = preflight_check(config, INTERFACES, ssh_session=None)
+        self.assertTrue(result.ok)
+        self.assertTrue(any("strict=false" in w for w in result.warnings))
+
+    def test_legacy_config_with_no_allowlist_section_defaults_to_strict(self):
+        # A pre-Phase-2A config that doesn't even have an `allowlist` key.
+        # The preflight should treat this as strict=true (safe).
+        config = {}  # truly minimal
+        result = preflight_check(config, INTERFACES, ssh_session=None)
+        self.assertTrue(result.ok)
+
+
 class TestFindSupplicantPids(unittest.TestCase):
     """Pure-Python smoke test: function returns a dict on every platform.
 

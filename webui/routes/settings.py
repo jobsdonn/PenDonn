@@ -1,12 +1,16 @@
-"""Settings page + whitelist editor.
+"""Settings page + allowlist editor.
 
-Read-most-write-some: shows every config section, but only the SSID
-whitelist is editable from the UI (the rest are either secrets that
-belong in config.json.local managed via CLI, or operational knobs you
-shouldn't be hot-reloading from a web button on a Pi).
+Read-most-write-some: shows every config section, but only the targeting
+allowlist + the strict-mode flag are editable from the UI (the rest are
+either secrets that belong in config.json.local managed via CLI, or
+operational knobs you shouldn't be hot-reloading from a web button on a Pi).
 
-Whitelist edits are written to config.json.local — never to the tracked
+Allowlist edits are written to config.json.local — never to the tracked
 config.json — so per-deployment SSIDs don't accumulate in git.
+
+URLs: the new spelling is /partials/allowlist/{add,remove}; the old
+/partials/whitelist/{add,remove} are kept as aliases so a Pi running an
+older version of the UI doesn't break for an in-flight htmx request mid-deploy.
 """
 
 import copy
@@ -70,6 +74,7 @@ def _safety_status(config: Dict[str, Any]) -> Dict[str, Any]:
 @router.get("/settings")
 def settings_page(request: Request, username: str = Depends(require_login)):
     cfg = request.app.state.config
+    al = cfg.get("allowlist", {}) or {}
     return request.app.state.templates.TemplateResponse(
         "settings.html",
         {
@@ -78,7 +83,8 @@ def settings_page(request: Request, username: str = Depends(require_login)):
             "active_nav": "settings",
             "config_redacted": _redact(cfg),
             "config_json": json.dumps(_redact(cfg), indent=2, sort_keys=True),
-            "whitelist": list((cfg.get("whitelist", {}) or {}).get("ssids", []) or []),
+            "allowlist": list(al.get("ssids") or []),
+            "allowlist_strict": bool(al.get("strict", True)),
             "safety": _safety_status(cfg),
             "config_path": request.app.state.config_path,
             "overlay_path": local_overlay_path(request.app.state.config_path),
@@ -87,20 +93,23 @@ def settings_page(request: Request, username: str = Depends(require_login)):
     )
 
 
-@router.get("/partials/whitelist")
-def whitelist_partial(request: Request, username: str = Depends(require_login)):
+@router.get("/partials/allowlist")
+@router.get("/partials/whitelist")  # legacy alias
+def allowlist_partial(request: Request, username: str = Depends(require_login)):
     cfg = request.app.state.config
+    al = cfg.get("allowlist", {}) or {}
     return request.app.state.templates.TemplateResponse(
-        "partials/whitelist.html",
+        "partials/allowlist.html",
         {
             "request": request,
-            "whitelist": list((cfg.get("whitelist", {}) or {}).get("ssids", []) or []),
+            "allowlist": list(al.get("ssids") or []),
+            "allowlist_strict": bool(al.get("strict", True)),
         },
     )
 
 
 # Conservative SSID validator: match what hostapd / iwconfig accept and
-# what wifi_scanner.whitelist actually compares against. Up to 32 bytes,
+# what wifi_scanner targeting actually compares against. Up to 32 bytes,
 # no NUL/CR/LF, allow any other UTF-8 byte.
 _SSID_RE = re.compile(r"^[^\x00\r\n]{1,32}$")
 
@@ -112,8 +121,17 @@ def _normalize_ssid(raw: str) -> str:
     return s
 
 
-def _persist_whitelist(request: Request, ssids: list) -> None:
-    """Write the SSID list to config.json.local without clobbering other overlay keys."""
+def _persist_allowlist(
+    request: Request,
+    ssids: list,
+    strict: Optional[bool] = None,
+) -> None:
+    """Write allowlist to config.json.local without clobbering other overlay keys.
+
+    Always writes under the modern `allowlist` key. The legacy `whitelist`
+    key is removed from the overlay if present (config_loader's normalizer
+    handles back-compat for any deployed config.json files).
+    """
     overlay_path = local_overlay_path(request.app.state.config_path)
     overlay: Dict[str, Any] = {}
     if os.path.isfile(overlay_path):
@@ -122,33 +140,51 @@ def _persist_whitelist(request: Request, ssids: list) -> None:
                 overlay = json.load(f)
         except (OSError, json.JSONDecodeError):
             overlay = {}
-    overlay.setdefault("whitelist", {})["ssids"] = ssids
+    al_overlay = overlay.setdefault("allowlist", {})
+    al_overlay["ssids"] = ssids
+    if strict is not None:
+        al_overlay["strict"] = bool(strict)
+    overlay.pop("whitelist", None)
     _atomic_write_local(overlay_path, overlay)
+
     # Reflect in the live in-memory config so the next page render sees it.
     cfg = request.app.state.config
-    cfg.setdefault("whitelist", {})["ssids"] = ssids
+    al = cfg.setdefault("allowlist", {})
+    al["ssids"] = ssids
+    if strict is not None:
+        al["strict"] = bool(strict)
+    # Mirror to legacy `whitelist.ssids` per the normalizer's contract.
+    cfg.setdefault("whitelist", {})["ssids"] = list(ssids)
 
 
-@router.post("/partials/whitelist/add")
-def whitelist_add(
+def _current_allowlist(cfg: Dict[str, Any]) -> list:
+    return list((cfg.get("allowlist", {}) or {}).get("ssids") or [])
+
+
+@router.post("/partials/allowlist/add")
+@router.post("/partials/whitelist/add")  # legacy alias
+def allowlist_add(
     request: Request,
     ssid: str = Form(""),
     username: str = Depends(require_login),
 ):
     s = _normalize_ssid(ssid)
     cfg = request.app.state.config
-    current = list((cfg.get("whitelist", {}) or {}).get("ssids", []) or [])
+    current = _current_allowlist(cfg)
     if s not in current:
         current.append(s)
-        _persist_whitelist(request, current)
+        _persist_allowlist(request, current)
+    al = cfg.get("allowlist", {}) or {}
     return request.app.state.templates.TemplateResponse(
-        "partials/whitelist.html",
-        {"request": request, "whitelist": current},
+        "partials/allowlist.html",
+        {"request": request, "allowlist": current,
+         "allowlist_strict": bool(al.get("strict", True))},
     )
 
 
-@router.post("/partials/whitelist/remove")
-def whitelist_remove(
+@router.post("/partials/allowlist/remove")
+@router.post("/partials/whitelist/remove")  # legacy alias
+def allowlist_remove(
     request: Request,
     ssid: str = Form(""),
     username: str = Depends(require_login),
@@ -157,11 +193,37 @@ def whitelist_remove(
     if not s:
         raise HTTPException(status_code=400, detail="ssid required")
     cfg = request.app.state.config
-    current = list((cfg.get("whitelist", {}) or {}).get("ssids", []) or [])
+    current = _current_allowlist(cfg)
     if s in current:
         current.remove(s)
-        _persist_whitelist(request, current)
+        _persist_allowlist(request, current)
+    al = cfg.get("allowlist", {}) or {}
     return request.app.state.templates.TemplateResponse(
-        "partials/whitelist.html",
-        {"request": request, "whitelist": current},
+        "partials/allowlist.html",
+        {"request": request, "allowlist": current,
+         "allowlist_strict": bool(al.get("strict", True))},
+    )
+
+
+@router.post("/partials/allowlist/strict")
+def allowlist_strict_toggle(
+    request: Request,
+    strict: str = Form(""),
+    username: str = Depends(require_login),
+):
+    """Flip the strict flag.
+
+    strict=true  → only attack listed SSIDs (safe default).
+    strict=false → attack every visible SSID (DANGEROUS — refuses to start
+                   without safety.armed_override; we still allow flipping the
+                   bit here so operators can stage a config that preflight
+                   will then validate).
+    """
+    new_strict = strict.lower() in ("1", "true", "on", "yes")
+    cfg = request.app.state.config
+    current = _current_allowlist(cfg)
+    _persist_allowlist(request, current, strict=new_strict)
+    return request.app.state.templates.TemplateResponse(
+        "partials/allowlist.html",
+        {"request": request, "allowlist": current, "allowlist_strict": new_strict},
     )

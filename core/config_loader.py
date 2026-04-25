@@ -81,23 +81,79 @@ def load_config(config_path: str) -> Dict[str, Any]:
     """Load config from `config_path`, then merge `<path>.local` on top.
 
     The `.local` file is optional. Documentation-only keys (those starting
-    with `_`) are stripped from the returned dict.
+    with `_`) are stripped from the returned dict. Then the merged config
+    is passed through `_normalize_targeting_keys` which handles the
+    `whitelist` → `allowlist` rename so old configs keep working.
     """
     with open(config_path, "r", encoding="utf-8") as f:
         base = json.load(f)
     overlay_path = local_overlay_path(config_path)
+    merged: Dict[str, Any]
     if os.path.isfile(overlay_path):
         try:
             with open(overlay_path, "r", encoding="utf-8") as f:
                 overlay = json.load(f)
             logger.info("Loaded local overlay from %s", overlay_path)
-            return _deep_merge(base, overlay)
+            merged = _deep_merge(base, overlay)
         except (OSError, json.JSONDecodeError) as e:
             logger.error(
                 "Failed to load %s: %s — continuing with tracked config only",
                 overlay_path, e,
             )
-    return _deep_merge(base, {})  # strips _-keys
+            merged = _deep_merge(base, {})
+    else:
+        merged = _deep_merge(base, {})
+    return _normalize_targeting_keys(merged)
+
+
+def _normalize_targeting_keys(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize the renamed `whitelist` → `allowlist` schema.
+
+    Audit fallout (2026-04): the legacy `whitelist` key was misnamed —
+    operators consistently read it as "allowed targets" when the code
+    actually used it as a "skip list". The semantic flip plus a new
+    `allowlist.strict` flag lives in Phase 2A. This function makes both
+    spellings interoperable so deployed config.json files keep working
+    until operators migrate.
+
+    Rules:
+      - If `allowlist` exists, it wins. `whitelist` is overwritten to
+        match (so legacy code reading `whitelist` sees the same list).
+      - If only `whitelist` exists, copy it to `allowlist` and warn.
+      - If both exist with different `ssids`, prefer `allowlist`, warn.
+      - `allowlist.strict` defaults to True (safe: only attack listed).
+        Set to False explicitly + safety.armed_override=True to attack
+        every visible SSID (legacy unrestricted mode).
+    """
+    wl = config.get("whitelist") or {}
+    al = config.get("allowlist") or {}
+
+    al_ssids = al.get("ssids")
+    wl_ssids = wl.get("ssids")
+
+    if al_ssids is not None and wl_ssids is not None and al_ssids != wl_ssids:
+        logger.warning(
+            "config has both `allowlist` and `whitelist` with differing ssids — "
+            "preferring `allowlist`. Drop the legacy `whitelist` key from your "
+            "config to silence this warning."
+        )
+
+    if al_ssids is None and wl_ssids is not None:
+        logger.warning(
+            "config uses legacy `whitelist` key — please rename to `allowlist`. "
+            "Continuing with `whitelist` interpreted as the allowlist."
+        )
+        al = {**al, "ssids": list(wl_ssids)}
+
+    # Defaults: strict=True (safe), ssids=[] if neither key was set
+    al.setdefault("ssids", [])
+    al.setdefault("strict", True)
+    config["allowlist"] = al
+    # Mirror back to `whitelist` so legacy readers (web/app.py, scripts)
+    # see the same list — they'll never see `strict`, which is fine,
+    # they didn't know about it.
+    config["whitelist"] = {"ssids": list(al["ssids"])}
+    return config
 
 
 def _atomic_write_local(overlay_path: str, payload: Dict[str, Any]) -> None:

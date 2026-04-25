@@ -725,9 +725,17 @@ print_success "Permissions set"
 # Enable services
 print_status "Enabling services..."
 systemctl daemon-reload
-systemctl enable ${SERVICE_NAME}.service
-systemctl enable ${WEB_SERVICE_NAME}.service
-print_success "Services enabled"
+# Phase 2A: do NOT auto-`enable` the services. The first-boot of a real
+# Pi (2026-04-25) showed that systemd would launch the daemon immediately
+# after install with whatever default config existed — including an empty
+# allowlist that triggered indiscriminate scanning of neighbor APs. The
+# operator must now explicitly:
+#   1. Configure interfaces + allowlist (web UI > Settings, or edit
+#      /opt/pendonn/config/config.json.local)
+#   2. Run preflight: `sudo /opt/pendonn/venv/bin/python3 /opt/pendonn/main.py --preflight`
+#   3. Then `sudo systemctl enable --now pendonn pendonn-web`
+# Service unit files ARE installed and `start`/`stop`/`restart` work.
+print_success "Service unit files installed (NOT enabled — see post-install instructions)"
 
 # Interactive Configuration Wizard
 echo ""
@@ -1065,8 +1073,14 @@ echo -e "4. Change the web interface secret key"
 echo -e "5. ${RED}IMPORTANT:${NC} Starting services will put WiFi in monitor mode"
 echo -e "   This will disconnect your SSH session!"
 echo ""
-echo -e "${YELLOW}Service Management:${NC}"
-echo -e "Start services:  ${BLUE}sudo systemctl start $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
+echo -e "${YELLOW}Phase 2A: services are installed but NOT enabled.${NC}"
+echo -e "${YELLOW}First, populate the allowlist (SSIDs you have permission to attack):${NC}"
+echo -e "   ${BLUE}sudo nano /opt/pendonn/config/config.json.local${NC}"
+echo -e "   add: ${BLUE}{ \"allowlist\": { \"strict\": true, \"ssids\": [\"YourTarget1\"] } }${NC}"
+echo ""
+echo -e "${YELLOW}Then start (one-shot or persistent):${NC}"
+echo -e "Run once:        ${BLUE}sudo systemctl start $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
+echo -e "Auto-start boot: ${BLUE}sudo systemctl enable --now $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
 echo -e "Stop services:   ${BLUE}sudo systemctl stop $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
 echo -e "View logs:       ${BLUE}sudo journalctl -u $SERVICE_NAME -f${NC}"
 echo -e "Web interface:   ${BLUE}http://<raspberry-pi-ip>:8080${NC}"

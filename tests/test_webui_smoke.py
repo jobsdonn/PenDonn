@@ -223,20 +223,22 @@ class TestNetworksPage(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
 
     def test_whitelist_toggle_returns_updated_row(self):
-        # Currently NOT whitelisted
+        # NOTE: the URL path is still /whitelist for back-compat (the
+        # field name on the networks row reflects the operator's allowlist
+        # — same DB column `is_whitelisted`). UI label is now "In allowlist".
         r = self.client.post(
             "/partials/networks/AA:BB:CC:DD:EE:02/whitelist",
             data={"whitelisted": "1"},
         )
         self.assertEqual(r.status_code, 200)
         self.assertIn("Kjell-Guest", r.text)
-        self.assertIn("Whitelisted", r.text)
+        self.assertIn("In allowlist", r.text)
         # Flip back off
         r = self.client.post(
             "/partials/networks/AA:BB:CC:DD:EE:02/whitelist",
             data={"whitelisted": "0"},
         )
-        self.assertIn("Add to whitelist", r.text)
+        self.assertIn("Add to allowlist", r.text)
 
     def test_whitelist_toggle_rejects_bad_bssid(self):
         r = self.client.post(
@@ -569,9 +571,11 @@ class TestSettingsPage(unittest.TestCase):
     def test_settings_page_renders(self):
         r = self.client.get("/settings")
         self.assertEqual(r.status_code, 200)
-        # Title
-        self.assertIn("Whitelisted SSIDs", r.text)
+        # Title (Phase 2A rename)
+        self.assertIn("Allowlist", r.text)
         self.assertIn("Configuration", r.text)
+        # Strict mode toggle present
+        self.assertIn("Strict mode", r.text)
         # Safety pills present
         self.assertIn("SSHGuard", r.text)
         self.assertIn("Web auth", r.text)
@@ -587,33 +591,61 @@ class TestSettingsPage(unittest.TestCase):
         # The "<redacted>" marker should be present somewhere
         self.assertIn("redacted", r.text)
 
-    def test_whitelist_add_then_remove(self):
-        r = self.client.post("/partials/whitelist/add", data={"ssid": "MyHome"})
+    def test_allowlist_add_then_remove(self):
+        r = self.client.post("/partials/allowlist/add", data={"ssid": "MyHome"})
         self.assertEqual(r.status_code, 200)
         self.assertIn("MyHome", r.text)
         # Adding again is a no-op
-        r2 = self.client.post("/partials/whitelist/add", data={"ssid": "MyHome"})
+        r2 = self.client.post("/partials/allowlist/add", data={"ssid": "MyHome"})
         self.assertEqual(r2.status_code, 200)
         # Remove
-        r3 = self.client.post("/partials/whitelist/remove", data={"ssid": "MyHome"})
+        r3 = self.client.post("/partials/allowlist/remove", data={"ssid": "MyHome"})
         self.assertEqual(r3.status_code, 200)
         self.assertNotIn("MyHome", r3.text)
 
-    def test_whitelist_persists_to_overlay_file(self):
-        self.client.post("/partials/whitelist/add", data={"ssid": "PersistMe"})
+    def test_legacy_whitelist_url_still_works(self):
+        # Bookmarks / mid-deploy htmx requests using the old path keep working.
+        r = self.client.post("/partials/whitelist/add", data={"ssid": "LegacyClient"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("LegacyClient", r.text)
+        r = self.client.post("/partials/whitelist/remove", data={"ssid": "LegacyClient"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_allowlist_persists_to_overlay_under_new_key(self):
+        self.client.post("/partials/allowlist/add", data={"ssid": "PersistMe"})
         overlay = self.config_path + ".local"
         self.assertTrue(os.path.isfile(overlay))
         import json as _json
         with open(overlay) as f:
             data = _json.load(f)
-        self.assertIn("PersistMe", data.get("whitelist", {}).get("ssids", []))
+        self.assertIn("PersistMe", data.get("allowlist", {}).get("ssids", []))
+        # Old `whitelist` key should NOT be present in the new overlay.
+        self.assertNotIn("whitelist", data)
 
-    def test_whitelist_rejects_bad_ssid(self):
-        r = self.client.post("/partials/whitelist/add", data={"ssid": "bad\nname"})
+    def test_strict_toggle_persists_and_renders(self):
+        # Default: strict=True (text says "ON")
+        r = self.client.get("/partials/allowlist")
+        self.assertIn("Strict mode", r.text)
+        self.assertIn("ON", r.text)
+        # Flip off
+        r = self.client.post("/partials/allowlist/strict", data={"strict": "0"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("OFF", r.text)
+        # Persisted to overlay
+        import json as _json
+        with open(self.config_path + ".local") as f:
+            data = _json.load(f)
+        self.assertFalse(data["allowlist"]["strict"])
+        # Flip back on
+        r = self.client.post("/partials/allowlist/strict", data={"strict": "1"})
+        self.assertIn("ON", r.text)
+
+    def test_allowlist_rejects_bad_ssid(self):
+        r = self.client.post("/partials/allowlist/add", data={"ssid": "bad\nname"})
         self.assertEqual(r.status_code, 400)
-        r2 = self.client.post("/partials/whitelist/add", data={"ssid": ""})
+        r2 = self.client.post("/partials/allowlist/add", data={"ssid": ""})
         self.assertEqual(r2.status_code, 400)
-        r3 = self.client.post("/partials/whitelist/add", data={"ssid": "a" * 33})
+        r3 = self.client.post("/partials/allowlist/add", data={"ssid": "a" * 33})
         self.assertEqual(r3.status_code, 400)
 
 

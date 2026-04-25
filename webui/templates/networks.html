@@ -23,7 +23,7 @@
                         class="rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm">
                     <option value="all"   {% if only == 'all' %}selected{% endif %}>All</option>
                     <option value="open"  {% if only == 'open' %}selected{% endif %}>In scope only</option>
-                    <option value="white" {% if only == 'white' %}selected{% endif %}>Whitelisted only</option>
+                    <option value="white" {% if only == 'white' %}selected{% endif %}>In allowlist only</option>
                 </select>
             </div>
         </form>

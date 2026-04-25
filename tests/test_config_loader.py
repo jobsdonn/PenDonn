@@ -31,7 +31,12 @@ class TestLoadConfig(unittest.TestCase):
     def test_returns_base_when_no_overlay(self):
         write_json(self.path, {"web": {"port": 8080}})
         cfg = load_config(self.path)
-        self.assertEqual(cfg, {"web": {"port": 8080}})
+        # The targeting normalizer always populates allowlist + mirrors to
+        # whitelist for back-compat, so a base-only load now also exposes
+        # those defaulted keys.
+        self.assertEqual(cfg["web"], {"port": 8080})
+        self.assertEqual(cfg["allowlist"], {"ssids": [], "strict": True})
+        self.assertEqual(cfg["whitelist"], {"ssids": []})
 
     def test_overlay_replaces_scalar(self):
         write_json(self.path, {"web": {"port": 8080, "host": "127.0.0.1"}})
@@ -78,7 +83,9 @@ class TestLoadConfig(unittest.TestCase):
         with open(local_overlay_path(self.path), "w") as f:
             f.write("{not valid json")
         cfg = load_config(self.path)
-        self.assertEqual(cfg, {"web": {"port": 8080}})
+        self.assertEqual(cfg["web"], {"port": 8080})
+        # Normalizer still runs even when overlay is bad
+        self.assertEqual(cfg["allowlist"], {"ssids": [], "strict": True})
 
 
 class TestEnsurePersistentSecret(unittest.TestCase):
@@ -146,6 +153,52 @@ class TestEnsurePersistentSecret(unittest.TestCase):
         # test base is just `{}` so .local provides everything.
         second = ensure_persistent_secret(cfg2, self.path)
         self.assertEqual(first, second)
+
+
+class TestTargetingNormalization(unittest.TestCase):
+    """Phase 2A: whitelist <-> allowlist normalization + strict-default."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "config.json")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_legacy_whitelist_is_promoted_to_allowlist(self):
+        write_json(self.path, {"whitelist": {"ssids": ["LegacyHome"]}})
+        cfg = load_config(self.path)
+        self.assertEqual(cfg["allowlist"]["ssids"], ["LegacyHome"])
+        self.assertTrue(cfg["allowlist"]["strict"])
+        # Mirror still present for legacy reader
+        self.assertEqual(cfg["whitelist"]["ssids"], ["LegacyHome"])
+
+    def test_modern_allowlist_takes_precedence_when_both_present(self):
+        # Base has legacy `whitelist`; overlay has modern `allowlist`.
+        write_json(self.path, {"whitelist": {"ssids": ["OldA", "OldB"]}})
+        write_json(local_overlay_path(self.path), {
+            "allowlist": {"ssids": ["NewC"], "strict": False},
+        })
+        cfg = load_config(self.path)
+        # allowlist wins; whitelist mirrors allowlist's ssids (not the base's)
+        self.assertEqual(cfg["allowlist"]["ssids"], ["NewC"])
+        self.assertFalse(cfg["allowlist"]["strict"])
+        self.assertEqual(cfg["whitelist"]["ssids"], ["NewC"])
+
+    def test_default_strict_true_when_only_ssids_given(self):
+        write_json(self.path, {"allowlist": {"ssids": ["Foo"]}})
+        cfg = load_config(self.path)
+        self.assertTrue(cfg["allowlist"]["strict"])
+
+    def test_explicit_strict_false_is_preserved(self):
+        write_json(self.path, {"allowlist": {"ssids": [], "strict": False}})
+        cfg = load_config(self.path)
+        self.assertFalse(cfg["allowlist"]["strict"])
+
+    def test_no_targeting_section_at_all_yields_safe_defaults(self):
+        write_json(self.path, {"web": {"port": 8080}})
+        cfg = load_config(self.path)
+        self.assertEqual(cfg["allowlist"], {"ssids": [], "strict": True})
 
 
 if __name__ == "__main__":

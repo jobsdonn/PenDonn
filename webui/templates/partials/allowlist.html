@@ -1,0 +1,69 @@
+<div id="allowlist" class="space-y-3">
+    {# Strict-mode toggle. Flipping it persists immediately to config.json.local
+       and re-renders this whole partial (so the badge below updates to match). #}
+    <div class="flex items-center justify-between gap-3 rounded-md border
+                {% if allowlist_strict %}border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30
+                {% else %}border-rose-300 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/30{% endif %}
+                px-3 py-2.5">
+        <div class="min-w-0">
+            <div class="text-sm font-medium">
+                Strict mode:
+                <span class="{% if allowlist_strict %}text-emerald-700 dark:text-emerald-300{% else %}text-rose-700 dark:text-rose-300{% endif %}">
+                    {% if allowlist_strict %}ON — only attack listed SSIDs{% else %}OFF — attack any visible SSID{% endif %}
+                </span>
+            </div>
+            <div class="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                {% if allowlist_strict %}
+                    Empty list = passive scan only. Add SSIDs below to enable attacks.
+                {% else %}
+                    <strong>Dangerous.</strong> Daemon will scan + attack every visible AP.
+                    Preflight will refuse to start unless <code class="font-mono">safety.armed_override</code> is true.
+                {% endif %}
+            </div>
+        </div>
+        <form hx-post="/partials/allowlist/strict"
+              hx-target="#allowlist"
+              hx-swap="outerHTML"
+              hx-confirm="{% if allowlist_strict %}Disable strict mode? Daemon will attack ANY visible SSID — only do this if you have permission to scan every network in range.{% else %}Re-enable strict mode? Daemon will only attack listed SSIDs.{% endif %}"
+              class="shrink-0">
+            <input type="hidden" name="strict" value="{{ '0' if allowlist_strict else '1' }}">
+            <button type="submit"
+                    class="px-2.5 py-1 rounded text-xs font-medium
+                           {% if allowlist_strict %}bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900
+                           {% else %}bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:hover:bg-emerald-900{% endif %}">
+                {% if allowlist_strict %}Disable{% else %}Enable{% endif %}
+            </button>
+        </form>
+    </div>
+
+    {% if allowlist %}
+    <ul class="divide-y divide-slate-200 dark:divide-ink-700 border border-slate-200 dark:border-ink-700 rounded-md overflow-hidden">
+        {% for ssid in allowlist %}
+        <li class="flex items-center justify-between px-3 py-2 bg-white dark:bg-ink-900">
+            <span class="font-mono text-sm">{{ ssid }}</span>
+            <form hx-post="/partials/allowlist/remove"
+                  hx-target="#allowlist"
+                  hx-swap="outerHTML"
+                  hx-confirm="Remove {{ ssid }} from allowlist?"
+                  class="inline">
+                <input type="hidden" name="ssid" value="{{ ssid }}">
+                <button type="submit"
+                        class="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-ink-800 hover:bg-rose-100 hover:text-rose-700 dark:hover:bg-rose-950 dark:hover:text-rose-300 text-slate-600 dark:text-slate-400">
+                    Remove
+                </button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-slate-500 dark:text-slate-400 italic">
+        {% if allowlist_strict %}
+            Allowlist is empty + strict mode is on → daemon is in passive scan mode and will not attack anything.
+            Add SSIDs you have written authorization to test below.
+        {% else %}
+            Allowlist is empty but strict mode is off → daemon will attack every visible AP.
+            <strong>Add SSIDs and re-enable strict mode</strong> if you don't have authorization for every network in range.
+        {% endif %}
+    </p>
+    {% endif %}
+</div>

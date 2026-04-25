@@ -115,6 +115,49 @@ If you change `core/safety.py`, run these tests before committing.
 
 ---
 
+## Targeting policy (Phase 2A)
+
+The legacy `whitelist` key was misnamed. Audit found that operators
+consistently read it as "allowed targets" while the code used it as a
+"skip list" — and on the first real-Pi deployment (2026-04-25) the
+empty-default was indeed the cause of an unintended scan of every
+neighbor AP within range. Phase 2A fixed this:
+
+- Renamed `whitelist` → `allowlist`. The legacy key is still accepted
+  as input (with a deprecation warning) so deployed configs keep working.
+- Added `allowlist.strict` flag (default `true`):
+  - `strict: true` → daemon ONLY targets SSIDs in `allowlist.ssids`.
+    Empty list = passive scan only, no attacks happen at all.
+  - `strict: false` → daemon attacks every visible SSID (legacy
+    "unrestricted" mode). Preflight refuses to start in this mode unless
+    `safety.armed_override` is also set.
+- The settings page exposes both the SSID list and the strict toggle.
+  Edits go to `config.json.local` and never touch the tracked
+  `config.json`.
+
+A safe minimal config:
+
+```json
+"allowlist": {
+  "strict": true,
+  "ssids": ["Customer-Authorized-AP-1", "Customer-Authorized-AP-2"]
+}
+```
+
+An unrestricted-scan config (only valid for fully-isolated lab use):
+
+```json
+"allowlist": {
+  "strict": false,
+  "ssids": []
+},
+"safety": {
+  "armed_override": true
+}
+```
+
+Without both, the daemon refuses to start.
+
 ## Plugin loader trust model
 
 `core/plugin_manager.py` discovers `.py` files under `plugins/` and runs

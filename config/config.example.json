@@ -30,9 +30,10 @@
     "handshake_timeout": 300
   },
 
-  "whitelist": {
-    "_comment": "Whitelisted SSIDs are NEVER attacked. Add your own networks here, plus any in-scope networks the customer has explicitly excluded.",
-    "ssids": ["MyHomeWiFi", "MyOfficeWiFi", "Customer-Excluded-AP"]
+  "allowlist": {
+    "_comment": "SSIDs the daemon is allowed to attack. Renamed from `whitelist` in Phase 2A — the old name is still accepted (logs a deprecation warning). Semantics flipped from skip-list to target-list at the same time. With strict=true (default + safe), daemon ONLY targets these SSIDs. With strict=false (unrestricted), the list is ignored and every visible AP is fair game — requires safety.armed_override or preflight refuses to start.",
+    "strict": true,
+    "ssids": ["Kjell-BYOD", "Kjell-Office", "Kjell-DS", "TestTarget-AP"]
   },
 
   "cracking": {

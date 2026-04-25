@@ -43,7 +43,14 @@ class WiFiScanner:
         logger.info(f"Using attack interface: {self.attack_interface} (deauth)")
         logger.info(f"Management interface (DO NOT TOUCH): {self.management_interface}")
         
-        self.whitelist_ssids = set(config['whitelist']['ssids'])
+        # Targeting (Phase 2A): allowlist + strict flag.
+        # config_loader.normalize_targeting_keys ensures `allowlist` exists
+        # with both `ssids` and `strict` defaults set, so we can read freely.
+        # Legacy callers reading `config['whitelist']['ssids']` still see the
+        # mirrored list (set by the same normalizer), so we don't break them.
+        allowlist_cfg = config.get('allowlist', {}) or {}
+        self.allowlist_ssids = set(allowlist_cfg.get('ssids') or [])
+        self.allowlist_strict = bool(allowlist_cfg.get('strict', True))
         self.running = False
         
         # Scan results
@@ -69,10 +76,27 @@ class WiFiScanner:
         self.enumeration_active = False  # Flag to pause new captures during enumeration
         self.enumeration_lock = threading.Lock()  # Lock for safe pause/resume
         
-        if self.whitelist_ssids:
-            logger.info(f"Whitelist active: {list(self.whitelist_ssids)}")
+        # Loud, explicit logging about the targeting policy. The previous
+        # message ("Whitelist EMPTY - will attack ALL networks!") was easy
+        # to miss in startup output; today's incident proved that. Now
+        # we make the safe / unsafe distinction unmistakable.
+        if self.allowlist_strict:
+            if self.allowlist_ssids:
+                logger.info(
+                    "TARGETING: strict allowlist — will only attack: %s",
+                    sorted(self.allowlist_ssids),
+                )
+            else:
+                logger.info(
+                    "TARGETING: strict allowlist + EMPTY list — passive scan only, "
+                    "no SSID will be attacked. Add SSIDs via the web UI or "
+                    "config to enable attacks."
+                )
         else:
-            logger.warning("Whitelist EMPTY - will attack ALL networks!")
+            logger.warning(
+                "TARGETING: strict=false — will attack ANY visible SSID. "
+                "Preflight should have refused this without safety.armed_override."
+            )
     
     def pause_for_enumeration(self):
         """Pause wifi scanning/attacking for enumeration to use attack interface"""
@@ -405,10 +429,12 @@ class WiFiScanner:
                         network_id = self.db.add_network(essid, bssid, channel_num, enc_type, signal)
                         self.networks[bssid]['id'] = network_id
                         
-                        # Set whitelist flag (True if in whitelist, False otherwise)
-                        if self.whitelist_ssids:
-                            is_whitelisted = essid in self.whitelist_ssids
-                            self.db.set_whitelist(bssid, is_whitelisted)
+                        # Set DB flag (True if SSID is in operator's allowlist).
+                        # The DB column is still named `is_whitelisted` for back-compat
+                        # — Phase 2A renamed config keys but not schema columns.
+                        if self.allowlist_ssids:
+                            is_in_allowlist = essid in self.allowlist_ssids
+                            self.db.set_whitelist(bssid, is_in_allowlist)
                         
                         logger.info(f"✓ Found: {essid} ({bssid}) CH:{channel_num} {enc_type} {signal}dBm")
                         networks_found += 1
@@ -422,10 +448,10 @@ class WiFiScanner:
                         })
                         self.db.add_network(essid, bssid, channel_num, enc_type, signal)
                         
-                        # Update whitelist flag (True if in whitelist, False otherwise)
-                        if self.whitelist_ssids:
-                            is_whitelisted = essid in self.whitelist_ssids
-                            self.db.set_whitelist(bssid, is_whitelisted)
+                        # Update DB flag (True if SSID is in operator's allowlist).
+                        if self.allowlist_ssids:
+                            is_in_allowlist = essid in self.allowlist_ssids
+                            self.db.set_whitelist(bssid, is_in_allowlist)
                     
                     # Store candidate for handshake capture
                     # We'll prioritize networks with clients later
@@ -438,8 +464,14 @@ class WiFiScanner:
                             # Skip this network - captured too recently
                             continue
                         
-                        # Only consider if no whitelist or network is in whitelist
-                        if not self.whitelist_ssids or essid in self.whitelist_ssids:
+                        # Targeting decision (Phase 2A semantics):
+                        #   strict=True  + ssid in allowlist → attack
+                        #   strict=True  + ssid NOT in list  → skip (safe default)
+                        #   strict=False                     → attack regardless
+                        #     (preflight has already required armed_override
+                        #      for the strict=False case, so reaching this
+                        #      branch with strict=False is operator-authorized)
+                        if (not self.allowlist_strict) or (essid in self.allowlist_ssids):
                             # Store for prioritization (will be handled after parsing ALL networks)
                             self.networks[bssid]['capture_candidate'] = True
                         else:

@@ -19,9 +19,10 @@
     "handshake_timeout": 300,
     "_comment": "Interface names can swap on reboot — populate monitor_mac/attack_mac/management_mac for stable detection. management_interface MUST point to whichever iface carries SSH; safety preflight will refuse to start otherwise."
   },
-  "whitelist": {
-    "ssids": [],
-    "_comment": "SSIDs in this list are NEVER targeted (no scanning, no deauth, no handshake capture, no enumeration). Add your home/work networks here BEFORE first run. Empty list = nothing protected."
+  "allowlist": {
+    "_comment": "SSIDs that the daemon is ALLOWED to target (scan, deauth, capture, crack, enumerate). When `strict` is true (default), the daemon ONLY touches networks in this list — empty list = scan-only mode, nothing gets attacked. When `strict` is false, the list is ignored and EVERY visible SSID is fair game (requires safety.armed_override; refuses to start otherwise). The legacy `whitelist` key is still accepted as an alias for back-compat.",
+    "strict": true,
+    "ssids": []
   },
   "cracking": {
     "enabled": true,

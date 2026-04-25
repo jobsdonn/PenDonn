@@ -499,7 +499,39 @@ def preflight_check(
                         result.fatal_errors.append(msg)
                         result.ok = False
 
-    # Check 3: management iface (if defined) must currently have an IP and be
+    # Check 3: targeting policy (Phase 2A). The legacy "empty whitelist =
+    # attack everything" footgun bit us on first boot of a real Pi. New
+    # rule: if `allowlist.strict=false` (operator wants to attack every
+    # visible SSID), that requires explicit safety.armed_override. Without
+    # the override, we refuse rather than nuke the neighborhood.
+    al = config.get("allowlist", {}) or {}
+    strict = bool(al.get("strict", True))
+    al_ssids = list(al.get("ssids") or [])
+    if not strict:
+        msg = (
+            "allowlist.strict=false means the daemon will attack EVERY visible "
+            "SSID (no scope filter). This requires safety.armed_override=true "
+            "to acknowledge that you've coordinated unrestricted scanning with "
+            "every network owner in range."
+        )
+        if safety_cfg.armed_override:
+            result.warnings.append(msg)
+        else:
+            result.fatal_errors.append(msg)
+            result.ok = False
+    else:
+        if al_ssids:
+            result.info.append(
+                f"allowlist.strict=true with {len(al_ssids)} SSID(s) — "
+                f"daemon will only target those."
+            )
+        else:
+            result.info.append(
+                "allowlist.strict=true with empty list — passive scan only, "
+                "no attacks. Add SSIDs to allowlist.ssids to enable attacks."
+            )
+
+    # Check 4: management iface (if defined) must currently have an IP and be
     # in managed mode. If it doesn't, the operator is already in a bad state
     # and we should report it loudly before doing anything that makes it worse.
     if management:
