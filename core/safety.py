@@ -191,6 +191,84 @@ def iface_has_ip(iface: str) -> bool:
         return False
 
 
+def find_supplicant_pids_by_iface() -> Dict[str, List[int]]:
+    """Walk /proc and return {iface: [pid, ...]} for running wpa_supplicant."""
+    return _find_iface_pids_for_program("wpa_supplicant")
+
+
+def find_dhcpcd_pids_by_iface() -> Dict[str, List[int]]:
+    """Walk /proc and return {iface: [pid, ...]} for running dhcpcd.
+
+    dhcpcd's iface name is the LAST positional arg (after any flags).
+    Empty dict if no iface arg (system-wide daemon mode) — those should
+    NEVER be killed by enumerator code; only per-iface invocations.
+    """
+    out: Dict[str, List[int]] = {}
+    proc_root = "/proc"
+    if platform.system() != "Linux" or not os.path.isdir(proc_root):
+        return out
+    for entry in os.listdir(proc_root):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                argv = [a.decode(errors="replace") for a in f.read().split(b"\x00") if a]
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
+        if not argv:
+            continue
+        if os.path.basename(argv[0]) != "dhcpcd":
+            continue
+        # Last non-flag positional arg = iface (if any).
+        positionals = [a for a in argv[1:] if not a.startswith("-")]
+        if positionals:
+            out.setdefault(positionals[-1], []).append(pid)
+    return out
+
+
+def _find_iface_pids_for_program(program: str) -> Dict[str, List[int]]:
+    """Helper for find_supplicant_pids_by_iface.
+
+    Replaces the audit's `pgrep -f '<prog>.*<iface>'` pattern, which is a
+    substring match on the full command line and can wrongly match e.g.
+    `wpa_supplicant --help wlan0` from a user's shell history. We parse
+    /proc/<pid>/cmdline directly and look for the actual `-i <iface>` arg.
+    """
+    out: Dict[str, List[int]] = {}
+    proc_root = "/proc"
+    if platform.system() != "Linux" or not os.path.isdir(proc_root):
+        return out
+
+    for entry in os.listdir(proc_root):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                argv = f.read().split(b"\x00")
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
+        if not argv or not argv[0]:
+            continue
+        prog = os.path.basename(argv[0].decode(errors="replace"))
+        if prog != program:
+            continue
+        # Parse `-i <iface>` from argv (or `-iwlan0` short form).
+        iface = None
+        for i, raw in enumerate(argv):
+            arg = raw.decode(errors="replace")
+            if arg == "-i" and i + 1 < len(argv):
+                iface = argv[i + 1].decode(errors="replace")
+                break
+            if arg.startswith("-i") and len(arg) > 2:
+                iface = arg[2:]
+                break
+        if iface:
+            out.setdefault(iface, []).append(pid)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # SSHGuard — the hard gate
 # ---------------------------------------------------------------------------

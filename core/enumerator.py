@@ -13,7 +13,15 @@ import socket
 from datetime import datetime
 from typing import Dict, List, Optional
 import nmap
+import signal
 from .interface_manager import resolve_interfaces
+from .safety import (
+    SSHGuard,
+    SafetyConfig,
+    SafetyViolation,
+    find_dhcpcd_pids_by_iface,
+    find_supplicant_pids_by_iface,
+)
 from .secure_io import (
     encode_wpa_supplicant_psk,
     encode_wpa_supplicant_ssid,
@@ -53,6 +61,12 @@ class NetworkEnumerator:
         interfaces = resolve_interfaces(config)
         self.enumeration_interface = interfaces['monitor']  # Use monitor interface (Realtek 8812AU - supports both modes)
         self.management_interface = interfaces['management']
+
+        # SSH-lockout guard. Used before any operation that could touch the
+        # management iface (kill its supplicant, switch its mode, etc.).
+        self._ssh_guard = SSHGuard(
+            SafetyConfig.from_dict(config.get('safety')), interfaces,
+        )
         
         self.running = False
         self.active_scans = {}  # scan_id -> scan_info
@@ -312,15 +326,26 @@ class NetworkEnumerator:
             with open(conf_file, "w") as f:
                 f.write(wpa_conf)
             
-            # Kill only wpa_supplicant for this specific interface (not all!)
-            # Using killall would kill the management interface's wpa_supplicant too
+            # Kill wpa_supplicant for THIS interface only.
+            #
+            # Old code did `pgrep -f 'wpa_supplicant.*<iface>'` + `kill <pid>`.
+            # That substring match could (and the audit confirmed it does)
+            # match the system-wide wpa_supplicant on the management iface
+            # — killing it severs SSH. Now we walk /proc and parse `-i <iface>`
+            # from each cmdline, then run the resulting PIDs through
+            # SSHGuard.assert_safe_to_kill_supplicant which filters out
+            # anything on the management iface unless armed_override is set.
             try:
-                result = subprocess.run(['pgrep', '-f', f'wpa_supplicant.*{interface}'], 
-                                      capture_output=True, text=True)
-                if result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
-                        subprocess.run(['kill', pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                pids_by_iface = find_supplicant_pids_by_iface()
+                pids_to_kill = self._ssh_guard.assert_safe_to_kill_supplicant(
+                    {iface: pids_by_iface.get(iface, [])}
+                )
+                for pid in pids_to_kill:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError) as e:
+                        logger.warning(f"Could not SIGTERM wpa_supplicant pid {pid}: {e}")
+                if pids_to_kill:
                     time.sleep(1)
             except Exception as e:
                 logger.warning(f"Could not kill existing wpa_supplicant for {interface}: {e}")
@@ -342,14 +367,23 @@ class NetworkEnumerator:
             
             # Check for dhcpcd (Raspberry Pi OS)
             if subprocess.run(['which', 'dhcpcd'], capture_output=True).returncode == 0:
-                # Kill any existing dhcpcd for this interface ONLY (not the system-wide daemon!)
+                # Kill any existing dhcpcd for this interface ONLY.
+                # Same anti-pgrep-substring fix as for wpa_supplicant: walk
+                # /proc and identify per-iface dhcpcd by its argv. The
+                # system-wide dhcpcd daemon (no -i / no positional iface)
+                # is not in find_dhcpcd_pids_by_iface() output, so it can
+                # never be selected here.
                 try:
-                    result = subprocess.run(['pgrep', '-f', f'dhcpcd.*{interface}'], 
-                                          capture_output=True, text=True)
-                    if result.stdout.strip():
-                        pids = result.stdout.strip().split('\n')
-                        for pid in pids:
-                            subprocess.run(['kill', pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    pids_by_iface = find_dhcpcd_pids_by_iface()
+                    pids_to_kill = self._ssh_guard.assert_safe_to_kill_supplicant(
+                        {interface: pids_by_iface.get(interface, [])}
+                    )
+                    for pid in pids_to_kill:
+                        try:
+                            os.kill(pid, signal.SIGTERM)
+                        except (ProcessLookupError, PermissionError) as e:
+                            logger.warning(f"Could not SIGTERM dhcpcd pid {pid}: {e}")
+                    if pids_to_kill:
                         time.sleep(1)
                         logger.info(f"Killed existing dhcpcd for {interface}")
                 except Exception as e:
@@ -409,14 +443,19 @@ class NetworkEnumerator:
         try:
             logger.info(f"Disconnecting from network on {interface}")
             
-            # Kill only wpa_supplicant for this interface (not management interface!)
+            # Kill wpa_supplicant for this interface only — same SSHGuard-mediated
+            # path as in _connect_to_network. See that comment for rationale.
             try:
-                result = subprocess.run(['pgrep', '-f', f'wpa_supplicant.*{interface}'], 
-                                      capture_output=True, text=True)
-                if result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
-                        subprocess.run(['kill', pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                pids_by_iface = find_supplicant_pids_by_iface()
+                pids_to_kill = self._ssh_guard.assert_safe_to_kill_supplicant(
+                    {interface: pids_by_iface.get(interface, [])}
+                )
+                for pid in pids_to_kill:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError) as e:
+                        logger.warning(f"Could not SIGTERM wpa_supplicant pid {pid}: {e}")
+                if pids_to_kill:
                     time.sleep(1)
             except Exception as e:
                 logger.warning(f"Could not kill wpa_supplicant for {interface}: {e}")

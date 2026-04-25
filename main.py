@@ -16,6 +16,8 @@ from core.database import Database
 from core.plugin_manager import PluginManager
 from core.enumerator import NetworkEnumerator
 from core.cracker import PasswordCracker
+from core.interface_manager import resolve_interfaces
+from core.safety import preflight_check, SafetyConfig
 
 # Configure logging with unbuffered output to prevent log stalling
 log_dir = "./logs"
@@ -58,7 +60,27 @@ class PenDonn:
             self.config = json.load(f)
         
         logger.info(f"PenDonn v{self.config['system']['version']}")
-        
+
+        # SSH-lockout preflight. Run BEFORE we instantiate any module so
+        # we don't accidentally start a scanner that's about to flip the
+        # SSH iface into monitor mode. On fatal errors, exit cleanly with
+        # a clear message — operator must fix config or arm override.
+        interfaces = resolve_interfaces(self.config)
+        preflight = preflight_check(self.config, interfaces)
+        for line in preflight.info:
+            logger.info("preflight: %s", line)
+        for line in preflight.warnings:
+            logger.warning("preflight: %s", line)
+        for line in preflight.fatal_errors:
+            logger.error("preflight: %s", line)
+        if not preflight.ok:
+            logger.error("=" * 60)
+            logger.error("PREFLIGHT FAILED — refusing to start to prevent SSH lockout.")
+            logger.error("Fix config issues above, or set safety.armed_override=true")
+            logger.error("if you genuinely accept the lockout risk (see docs/SAFETY.md).")
+            logger.error("=" * 60)
+            sys.exit(2)
+
         # Initialize database
         logger.info("Initializing database...")
         self.db = Database(self.config['database']['path'])

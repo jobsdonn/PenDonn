@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Optional
 from .interface_manager import resolve_interfaces
+from .safety import SSHGuard, SafetyConfig, SafetyViolation
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,15 @@ class WiFiScanner:
         self.interface = interfaces['monitor']  # For passive scanning
         self.attack_interface = interfaces['attack']  # For deauth/handshake captures
         self.management_interface = interfaces['management']  # SSH - DO NOT TOUCH
-        
+
+        # Hard guard against modifying the management iface (or whichever iface
+        # the SSH session is riding over). Used in start() before any
+        # _enable_monitor_mode() call. Replaces the prior comment-only
+        # "DO NOT TOUCH" with an actual exception path.
+        self._ssh_guard = SSHGuard(
+            SafetyConfig.from_dict(config.get('safety')), interfaces,
+        )
+
         logger.info(f"Using monitor interface: {self.interface} (scanning)")
         logger.info(f"Using attack interface: {self.attack_interface} (deauth)")
         logger.info(f"Management interface (DO NOT TOUCH): {self.management_interface}")
@@ -154,7 +163,17 @@ class WiFiScanner:
     def start(self):
         """Start WiFi scanner"""
         logger.info("Starting WiFi scanner...")
-        
+
+        # SAFETY: refuse to start if the configured monitor interface is the
+        # one carrying SSH (or is the management iface). Operator can opt out
+        # via safety.armed_override in config.
+        try:
+            self._ssh_guard.assert_safe_to_modify(self.interface, operation="enable monitor mode")
+        except SafetyViolation as e:
+            logger.error(str(e))
+            logger.error("WiFi scanner refusing to start. Fix config or set safety.armed_override=true.")
+            return
+
         # Validate interface exists before trying to use it
         try:
             result = subprocess.run(['ip', 'link', 'show', self.interface],
@@ -168,7 +187,7 @@ class WiFiScanner:
         except Exception as e:
             logger.error(f"Failed to validate interface {self.interface}: {e}", exc_info=True)
             return
-        
+
         # Enable monitor mode with error handling
         try:
             self._enable_monitor_mode(self.interface)

@@ -176,5 +176,24 @@ class TestPreflight(unittest.TestCase):
         self.assertTrue(result.ok)
 
 
+class TestFindSupplicantPids(unittest.TestCase):
+    """Pure-Python smoke test: function returns a dict on every platform.
+
+    On Windows / non-Linux it returns {}. On Linux the contents depend on
+    the host. We don't try to spawn fake processes here — the value is in
+    asserting the return shape and that we don't crash.
+    """
+
+    def test_returns_dict(self):
+        from core.safety import find_supplicant_pids_by_iface
+        result = find_supplicant_pids_by_iface()
+        self.assertIsInstance(result, dict)
+        for k, v in result.items():
+            self.assertIsInstance(k, str)
+            self.assertIsInstance(v, list)
+            for pid in v:
+                self.assertIsInstance(pid, int)
+
+
 if __name__ == "__main__":
     unittest.main()
