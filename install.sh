@@ -42,8 +42,8 @@ NC='\033[0m' # No Color
 
 INSTALL_DIR="/opt/pendonn"
 SERVICE_NAME="pendonn"
-WEB_SERVICE_NAME="pendonn-web"
 WEBUI_SERVICE_NAME="pendonn-webui"
+WATCHDOG_SERVICE_NAME="pendonn-watchdog"
 
 echo -e "${BLUE}"
 cat << "EOF"
@@ -143,6 +143,8 @@ apt-get install -y \
     nginx \
     build-essential \
     dkms \
+    jq \
+    isc-dhcp-client \
     $KERNEL_HEADERS \
     bc || {
         # If some packages fail, try without optional ones
@@ -421,60 +423,51 @@ fi
 echo -e "${BLUE}Source directory: $SCRIPT_DIR${NC}"
 echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
 
-# Backup existing data if installation exists
-if [ -d "$INSTALL_DIR" ]; then
-    echo -e "${YELLOW}Found existing installation, backing up data...${NC}"
-    mkdir -p /tmp/pendonn_backup
-    [ -d "$INSTALL_DIR/data" ] && cp -r "$INSTALL_DIR/data" /tmp/pendonn_backup/ 2>/dev/null || true
-    [ -d "$INSTALL_DIR/logs" ] && cp -r "$INSTALL_DIR/logs" /tmp/pendonn_backup/ 2>/dev/null || true
-    [ -d "$INSTALL_DIR/handshakes" ] && cp -r "$INSTALL_DIR/handshakes" /tmp/pendonn_backup/ 2>/dev/null || true
-    
-    # Completely remove old installation
-    echo -e "${YELLOW}Removing old installation...${NC}"
-    chmod -R 755 "$INSTALL_DIR" 2>/dev/null || true
-    rm -rf "$INSTALL_DIR"
-    echo -e "${GREEN}Old installation removed${NC}"
-fi
+# Idempotent install: NEVER touch operator data on re-run.
+#
+# The earlier backup-to-/tmp + rm -rf + restore dance was fragile (any
+# interruption between rm and restore = lost handshakes). New behavior:
+#   - data/, logs/, handshakes/ are never deleted; rsync excludes them.
+#   - Application code (core/, webui/, plugins/, scripts/, config/, *.py)
+#     is rsynced into place, replacing whatever was there.
+#   - config/config.json.local is preserved (excluded from rsync) so the
+#     operator's secret_key + basic_auth + interface MACs survive re-runs.
+echo -e "${BLUE}Source directory: $SCRIPT_DIR${NC}"
+echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
 
-# Create fresh installation directory
-echo -e "${BLUE}Creating installation directory...${NC}"
-mkdir -p "$INSTALL_DIR"
-mkdir -p "$INSTALL_DIR/data"
-mkdir -p "$INSTALL_DIR/logs"
-mkdir -p "$INSTALL_DIR/plugins"
-mkdir -p "$INSTALL_DIR/handshakes"
-mkdir -p "$INSTALL_DIR/config"
+mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/data" "$INSTALL_DIR/logs" \
+         "$INSTALL_DIR/plugins" "$INSTALL_DIR/handshakes" "$INSTALL_DIR/config"
 
-# Restore backed up data
-if [ -d "/tmp/pendonn_backup" ]; then
-    echo -e "${BLUE}Restoring backed-up data...${NC}"
-    [ -d "/tmp/pendonn_backup/data" ] && cp -r /tmp/pendonn_backup/data/* "$INSTALL_DIR/data/" 2>/dev/null || true
-    [ -d "/tmp/pendonn_backup/logs" ] && cp -r /tmp/pendonn_backup/logs/* "$INSTALL_DIR/logs/" 2>/dev/null || true
-    [ -d "/tmp/pendonn_backup/handshakes" ] && cp -r /tmp/pendonn_backup/handshakes/* "$INSTALL_DIR/handshakes/" 2>/dev/null || true
-    rm -rf /tmp/pendonn_backup
-    echo -e "${GREEN}Data restored${NC}"
-fi
-
-print_success "Directory structure created"
+print_success "Directory structure ready"
 
 # Copy application files
 print_status "Copying application files..."
 cd "$SCRIPT_DIR"
 
-echo -e "${BLUE}Copying from: $SCRIPT_DIR${NC}"
-echo -e "${BLUE}Copying to:   $INSTALL_DIR${NC}"
-
-# Show what we're about to copy
-echo -e "${BLUE}Files in source directory:${NC}"
-ls -la "$SCRIPT_DIR" | head -10
+# Common exclusions: dev artefacts + operator state.
+# scripts/ IS copied — recovery-watchdog.sh is referenced by the systemd unit.
+RSYNC_EXCLUDES=(
+    --exclude='.venv'
+    --exclude='venv'
+    --exclude='.git'
+    --exclude='__pycache__'
+    --exclude='*.pyc'
+    --exclude='data/'
+    --exclude='logs/'
+    --exclude='handshakes/'
+    --exclude='config/config.json.local'
+)
 
 if command -v rsync &> /dev/null; then
     echo -e "${BLUE}Using rsync for file copy...${NC}"
-    rsync -rlptgoD --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data/' --exclude='logs/' --exclude='handshakes/' --exclude='scripts/' "$SCRIPT_DIR/" "$INSTALL_DIR/"
+    rsync -rlptgoD "${RSYNC_EXCLUDES[@]}" "$SCRIPT_DIR/" "$INSTALL_DIR/"
 else
-    # Fallback to tar for more reliable copying
     echo -e "${BLUE}Using tar for file copy...${NC}"
-    tar --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data' --exclude='logs' --exclude='handshakes' --exclude='scripts' -cf - . | (cd "$INSTALL_DIR" && tar -xf -)
+    tar --exclude='.venv' --exclude='venv' --exclude='.git' \
+        --exclude='__pycache__' --exclude='*.pyc' --exclude='data' \
+        --exclude='logs' --exclude='handshakes' \
+        --exclude='config/config.json.local' \
+        -cf - . | (cd "$INSTALL_DIR" && tar -xf -)
 fi
 
 print_success "Files copied"
@@ -634,33 +627,10 @@ SyslogIdentifier=pendonn
 WantedBy=multi-user.target
 EOF
 
-# Set up systemd service for legacy Flask web interface (port 8080)
-cat > /etc/systemd/system/${WEB_SERVICE_NAME}.service << EOF
-[Unit]
-Description=PenDonn Web Interface (legacy Flask, port 8080)
-After=network.target pendonn.service
-Wants=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=$INSTALL_DIR
-Environment="PATH=$INSTALL_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ExecStart=$INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/web/app.py
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=pendonn-web
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Set up systemd service for the new FastAPI/HTMX UI (port 8081)
+# Set up systemd service for the FastAPI/HTMX web UI (port 8081)
 cat > /etc/systemd/system/${WEBUI_SERVICE_NAME}.service << EOF
 [Unit]
-Description=PenDonn Web UI (modern FastAPI+HTMX, port 8081)
+Description=PenDonn Web UI (FastAPI+HTMX, port 8081)
 After=network.target pendonn.service
 Wants=network.target
 
@@ -676,6 +646,28 @@ RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=pendonn-webui
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Recovery watchdog: independent unit that flips the management iface
+# back from monitor → managed every 30s if anything escapes SSHGuard.
+# Last-resort lockout protection (see scripts/recovery-watchdog.sh).
+cat > /etc/systemd/system/${WATCHDOG_SERVICE_NAME}.service << EOF
+[Unit]
+Description=PenDonn Recovery Watchdog (SSH lockout last-resort)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/bin/bash $INSTALL_DIR/scripts/recovery-watchdog.sh
+Restart=always
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pendonn-watchdog
 
 [Install]
 WantedBy=multi-user.target
@@ -716,10 +708,10 @@ fi
 # Set permissions
 print_status "Setting permissions..."
 chmod +x "$INSTALL_DIR/main.py"
-chmod +x "$INSTALL_DIR/web/app.py"
+chmod +x "$INSTALL_DIR/scripts/recovery-watchdog.sh"
 chmod 600 "$INSTALL_DIR/config/config.json"
-# config.json.local (if generated by web/app.py first run) holds the
-# Flask secret_key and basic_auth password_hash. Lock it down too.
+# config.json.local holds the web secret_key + basic_auth password_hash.
+# Lock it down so nobody can tail it.
 [ -f "$INSTALL_DIR/config/config.json.local" ] && \
     chmod 600 "$INSTALL_DIR/config/config.json.local"
 
@@ -765,7 +757,7 @@ systemctl daemon-reload
 #   1. Configure interfaces + allowlist (web UI > Settings, or edit
 #      /opt/pendonn/config/config.json.local)
 #   2. Run preflight: `sudo /opt/pendonn/venv/bin/python3 /opt/pendonn/main.py --preflight`
-#   3. Then `sudo systemctl enable --now pendonn pendonn-web`
+#   3. Then `sudo systemctl enable --now pendonn pendonn-webui pendonn-watchdog`
 # Service unit files ARE installed and `start`/`stop`/`restart` work.
 print_success "Service unit files installed (NOT enabled — see post-install instructions)"
 
@@ -906,48 +898,51 @@ print('Config updated: WiFi interfaces and MAC addresses configured')
     
     echo ""
     
-    # Whitelist Configuration
-    echo -e "${BLUE}[2/5] Whitelist Configuration${NC}"
-    echo -e "${YELLOW}Add SSIDs to avoid scanning (your home/work networks)${NC}"
+    # Allowlist Configuration (Phase 2A: was "whitelist", inverted semantics)
+    echo -e "${BLUE}[2/5] Allowlist Configuration${NC}"
+    echo -e "${YELLOW}Add SSIDs you have permission to attack (strict mode by default).${NC}"
+    echo -e "${YELLOW}If you leave this empty, the daemon does PASSIVE SCAN ONLY — no attacks.${NC}"
     echo ""
-    
-    WHITELIST_SSIDS=""
+
+    ALLOWLIST_SSIDS=""
     while true; do
-        read -p "Enter SSID to whitelist (or press Enter to skip): " SSID
+        read -p "Enter authorized SSID (or press Enter to finish): " SSID
         if [ -z "$SSID" ]; then
             break
         fi
-        if [ -z "$WHITELIST_SSIDS" ]; then
-            WHITELIST_SSIDS="\"$SSID\""
+        if [ -z "$ALLOWLIST_SSIDS" ]; then
+            ALLOWLIST_SSIDS="\"$SSID\""
         else
-            WHITELIST_SSIDS="$WHITELIST_SSIDS, \"$SSID\""
+            ALLOWLIST_SSIDS="$ALLOWLIST_SSIDS, \"$SSID\""
         fi
         echo -e "${GREEN}Added: $SSID${NC}"
     done
-    
-    if [ -n "$WHITELIST_SSIDS" ]; then
-        # Update config with Python (proper JSON handling)
-        $INSTALL_DIR/venv/bin/python3 -c "
+
+    # Always write allowlist (with strict=true) so the daemon has a defined
+    # safe state. Empty list + strict=true = no attacks; the operator can
+    # add SSIDs later via the web UI's Settings page.
+    $INSTALL_DIR/venv/bin/python3 -c "
 import json
 with open('$CONFIG_FILE', 'r') as f:
     config = json.load(f)
-ssids = [$WHITELIST_SSIDS]
-config['whitelist']['ssids'] = ssids
+ssids = [$ALLOWLIST_SSIDS] if '$ALLOWLIST_SSIDS' else []
+config['allowlist'] = {'strict': True, 'ssids': ssids}
 with open('$CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2)
-print(f'Config updated: {len(ssids)} SSID(s) whitelisted')
+print(f'Allowlist: strict=true, {len(ssids)} SSID(s)')
 "
-        echo -e "${GREEN}Whitelist configured${NC}"
+    if [ -n "$ALLOWLIST_SSIDS" ]; then
+        echo -e "${GREEN}Allowlist configured (strict mode)${NC}"
     else
-        echo -e "${YELLOW}No SSIDs whitelisted - will scan ALL networks${NC}"
+        echo -e "${YELLOW}Empty allowlist + strict mode → daemon will only scan, never attack${NC}"
     fi
-    
+
     echo ""
-    
+
     # Web Interface Configuration
     echo -e "${BLUE}[3/5] Web Interface Configuration${NC}"
-    read -p "Enter web interface port [8080]: " WEB_PORT
-    WEB_PORT=${WEB_PORT:-8080}
+    read -p "Enter web interface port [8081]: " WEB_PORT
+    WEB_PORT=${WEB_PORT:-8081}
     
     # Generate random secret key
     SECRET_KEY=$(openssl rand -hex 32)
@@ -1051,11 +1046,11 @@ print('Config updated: display.enabled = ' + str($DISPLAY_ENABLED))
     else
         echo "    - Manual configuration needed"
     fi
-    echo "  Web Interface: http://<raspberry-pi-ip>:$WEB_PORT"
-    if [ -n "$WHITELIST_SSIDS" ]; then
-        echo "  Whitelisted SSIDs: Yes"
+    echo "  Web UI: http://<raspberry-pi-ip>:$WEB_PORT"
+    if [ -n "$ALLOWLIST_SSIDS" ]; then
+        echo "  Allowlisted SSIDs: Yes (strict mode)"
     else
-        echo "  Whitelisted SSIDs: None"
+        echo "  Allowlisted SSIDs: None (passive-scan only)"
     fi
     echo "  Auto-cracking: $AUTO_CRACK"
     echo "  Display: $HAS_DISPLAY"
@@ -1070,7 +1065,7 @@ with open('$CONFIG_FILE', 'r') as f:
 print(f\"  auto_start_cracking: {config['cracking']['auto_start_cracking']}\")
 print(f\"  display.enabled: {config['display']['enabled']}\")
 print(f\"  web.port: {config['web']['port']}\")
-print(f\"  whitelist.ssids: {len(config['whitelist']['ssids'])} SSID(s)\")
+print(f\"  allowlist.ssids: {len(config['allowlist']['ssids'])} SSID(s) (strict={config['allowlist'].get('strict', True)})\")
 if 'wifi' in config and 'monitor_interface' in config['wifi']:
     print(f\"  monitor_interface: {config['wifi']['monitor_interface']}\")
 "
@@ -1097,30 +1092,25 @@ echo -e "${BLUE}Installation Directory:${NC} $INSTALL_DIR"
 echo -e "${BLUE}Configuration File:${NC} $INSTALL_DIR/config/config.json"
 echo -e "${BLUE}Database Location:${NC} $INSTALL_DIR/data/pendonn.db"
 echo ""
-echo -e "${YELLOW}Important Next Steps:${NC}"
-echo -e "1. Edit configuration: ${BLUE}sudo nano $INSTALL_DIR/config/config.json${NC}"
-echo -e "2. Configure WiFi interfaces (wlan0, wlan1, wlan2)"
-echo -e "3. Add whitelisted SSIDs to avoid scanning"
-echo -e "4. Change the web interface secret key"
-echo -e "5. ${RED}IMPORTANT:${NC} Starting services will put WiFi in monitor mode"
-echo -e "   This will disconnect your SSH session!"
+echo -e "${YELLOW}Next steps:${NC}"
+echo -e "1. Set a web UI password:"
+echo -e "   ${BLUE}sudo $INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/scripts/hash-password.py${NC}"
+echo -e "   then put the hash under web.basic_auth.password_hash in config.json.local"
 echo ""
-echo -e "${YELLOW}Phase 2A: services are installed but NOT enabled.${NC}"
-echo -e "${YELLOW}First, populate the allowlist (SSIDs you have permission to attack):${NC}"
+echo -e "2. Verify allowlist (SSIDs you have permission to attack):"
 echo -e "   ${BLUE}sudo nano /opt/pendonn/config/config.json.local${NC}"
-echo -e "   add: ${BLUE}{ \"allowlist\": { \"strict\": true, \"ssids\": [\"YourTarget1\"] } }${NC}"
+echo -e "   shape: ${BLUE}{ \"allowlist\": { \"strict\": true, \"ssids\": [\"YourTarget1\"] } }${NC}"
 echo ""
-echo -e "${YELLOW}Then start (one-shot or persistent):${NC}"
-echo -e "Run once:        ${BLUE}sudo systemctl start $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
-echo -e "Auto-start boot: ${BLUE}sudo systemctl enable --now $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
-echo -e "Stop services:   ${BLUE}sudo systemctl stop $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
-echo -e "View logs:       ${BLUE}sudo journalctl -u $SERVICE_NAME -f${NC}"
-echo -e "Web interface:   ${BLUE}http://<raspberry-pi-ip>:8080${NC}"
+echo -e "3. Start (one-shot or persistent). The daemon runs preflight at boot;"
+echo -e "   if config would cause SSH lockout it refuses to start (see journalctl)."
+echo -e "      One-shot:   ${BLUE}sudo systemctl start $SERVICE_NAME $WEBUI_SERVICE_NAME $WATCHDOG_SERVICE_NAME${NC}"
+echo -e "      Persistent: ${BLUE}sudo systemctl enable --now $SERVICE_NAME $WEBUI_SERVICE_NAME $WATCHDOG_SERVICE_NAME${NC}"
 echo ""
-echo -e "${YELLOW}⚠️  IMPORTANT: Services are NOT started automatically${NC}"
-echo -e "${YELLOW}   This prevents disconnecting your SSH session during install.${NC}"
-echo -e "${YELLOW}   When ready, start services manually:${NC}"
-echo -e "   ${BLUE}sudo systemctl start $SERVICE_NAME $WEB_SERVICE_NAME${NC}"
+echo -e "View logs:    ${BLUE}sudo journalctl -u $SERVICE_NAME -f${NC}"
+echo -e "Web UI:       ${BLUE}http://<raspberry-pi-ip>:8081${NC}"
+echo ""
+echo -e "${RED}IMPORTANT:${NC} starting the daemon puts the monitor iface into monitor mode."
+echo -e "Verify your management iface is correct first — see docs/SAFETY.md."
 echo ""
 
 # Configure system to prevent WiFi driver conflicts
@@ -1199,13 +1189,11 @@ echo -e "${YELLOW}Recent logs (if service started):${NC}"
 journalctl -u pendonn -n 30 --no-pager 2>/dev/null || echo "  (No logs yet - service may not have started)"
 echo ""
 echo -e "${YELLOW}Useful commands:${NC}"
-echo "  • Check status:     sudo systemctl status pendonn"
-echo "  • View live logs:   sudo journalctl -u pendonn -f"
-echo "  • Check errors:     sudo journalctl -u pendonn -p err"
-echo "  • Restart service:  sudo systemctl restart pendonn"
-echo "  • Web UI:           http://$(hostname -I | awk '{print $1}'):8080"
-echo "  • Health check:     cd $INSTALL_DIR && sudo ./check_health.py"
-echo "  • Display test:     cd $INSTALL_DIR && sudo ./diagnose_display.py"
+echo "  • Service status:   sudo systemctl status pendonn pendonn-webui pendonn-watchdog"
+echo "  • Live logs:        sudo journalctl -u pendonn -f"
+echo "  • Errors only:      sudo journalctl -u pendonn -p err"
+echo "  • Restart daemon:   sudo systemctl restart pendonn"
+echo "  • Web UI:           http://$(hostname -I | awk '{print $1}'):8081"
 echo ""
 echo -e "${RED}REMINDER: Only use on networks you own or have permission to test!${NC}"
 echo ""

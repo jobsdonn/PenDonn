@@ -38,7 +38,7 @@ class AuthSettings:
             logger.warning(
                 "web.basic_auth.enabled=true but no password_hash or password "
                 "is set — login will reject every attempt. Generate a hash via "
-                "'python web/app.py --hash-password' and put it in "
+                "'python3 scripts/hash-password.py' and put it in "
                 "config.json.local under web.basic_auth.password_hash."
             )
 

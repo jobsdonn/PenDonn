@@ -2,8 +2,6 @@
 """Generate a basic_auth password_hash for config.json.local.
 
 Standalone — only depends on werkzeug (already in the venv).
-Replaces `python web/app.py --hash-password` from Phase 1E so the legacy
-Flask UI can be retired without losing this operator workflow.
 
 Usage:
     python3 scripts/hash-password.py            # interactive (recommended)

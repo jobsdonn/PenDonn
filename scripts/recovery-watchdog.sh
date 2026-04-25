@@ -51,17 +51,34 @@ if [ ! -r "$CONFIG_PATH" ]; then
     exit 2
 fi
 
+# Operator settings (MACs, allowlist, secret_key) live in config.json.local
+# alongside the base config. Read BOTH every iteration and merge — same
+# semantics as core/config_loader.py (recursive object merge, local wins).
+# Without this the watchdog would target whatever the unpopulated base
+# config says (default: wlan0) and could try to "restore" the actual
+# monitor iface, killing the daemon's capture.
+LOCAL_PATH="${CONFIG_PATH%.json}.json.local"
+
+get_merged_config() {
+    if [ -r "$LOCAL_PATH" ]; then
+        jq -s '.[0] * .[1]' "$CONFIG_PATH" "$LOCAL_PATH" 2>/dev/null
+    else
+        cat "$CONFIG_PATH" 2>/dev/null
+    fi
+}
+
 # Re-read every iteration so config edits take effect without restart.
 read_config() {
     local key="$1" default="$2"
-    jq -r --arg d "$default" ".${key} // \$d" "$CONFIG_PATH" 2>/dev/null
+    get_merged_config | jq -r --arg d "$default" ".${key} // \$d" 2>/dev/null
 }
 
 resolve_management_iface() {
     # Prefer MAC-based resolution; fall back to interface name.
-    local mac iface_by_name
-    mac=$(jq -r '.wifi.management_mac // ""' "$CONFIG_PATH" 2>/dev/null)
-    iface_by_name=$(jq -r '.wifi.management_interface // "wlan0"' "$CONFIG_PATH" 2>/dev/null)
+    local cfg mac iface_by_name
+    cfg=$(get_merged_config)
+    mac=$(echo "$cfg" | jq -r '.wifi.management_mac // ""' 2>/dev/null)
+    iface_by_name=$(echo "$cfg" | jq -r '.wifi.management_interface // "wlan0"' 2>/dev/null)
 
     if [ -n "$mac" ] && [ "$mac" != "null" ]; then
         # Look up iface owning this MAC

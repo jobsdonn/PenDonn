@@ -14,7 +14,7 @@ Two responsibilities:
      `.local` file with chmod 0600, and mutate the in-memory config to
      reflect it. Idempotent — second call is a no-op.
 
-Both callers (main.py daemon and web/app.py) use the same loader so the
+Both callers (main.py daemon and webui/app.py) use the same loader so the
 two processes see identical effective config.
 """
 
@@ -149,9 +149,9 @@ def _normalize_targeting_keys(config: Dict[str, Any]) -> Dict[str, Any]:
     al.setdefault("ssids", [])
     al.setdefault("strict", True)
     config["allowlist"] = al
-    # Mirror back to `whitelist` so legacy readers (web/app.py, scripts)
-    # see the same list — they'll never see `strict`, which is fine,
-    # they didn't know about it.
+    # Mirror to `whitelist` so any code still reading the old key sees
+    # the same list. They won't see `strict` — that's intentional, the
+    # legacy semantics didn't have it.
     config["whitelist"] = {"ssids": list(al["ssids"])}
     return config
 

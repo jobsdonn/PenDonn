@@ -487,7 +487,7 @@ class TestSystemPage(unittest.TestCase):
         r = self.client.get("/partials/services")
         self.assertEqual(r.status_code, 200)
         self.assertIn("pendonn.service", r.text)
-        self.assertIn("pendonn-web.service", r.text)
+        self.assertIn("pendonn-webui.service", r.text)
         # On non-Linux, the "systemctl unavailable" hint shows
         if not __import__("platform").system() == "Linux":
             self.assertIn("unavailable", r.text)

@@ -167,7 +167,7 @@ typically runs as root, so a plugin file = root code execution.
 Two layers of protection close the most common accidents:
 
 **Layer 1 — installer**
-`scripts/install.sh` (and the legacy top-level `install.sh`) runs:
+`install.sh` runs:
 
 ```
 chown -R root:root /opt/pendonn/plugins
@@ -203,28 +203,23 @@ developing plugins as a non-root user inside a VM), set:
 
 Logs a `WARNING` at every load. Not for production.
 
-## Adopting the guard in existing modules (Phase 1 work)
+## Where the guard is wired in
 
-Right now `core/safety.py` exists but no PenDonn module calls into it yet. That migration happens in Phase 1. The pattern is:
+`core/safety.py` is called from every place that mutates a WiFi iface:
+
+- `wifi_scanner.start()` — calls `assert_safe_to_modify(interface, operation='enable monitor mode')` before flipping the configured monitor iface. If it throws, the scanner refuses to start (logged, no crash).
+- `wifi_scanner._trigger_pmkid()` — same check before putting the attack iface in monitor mode for active PMKID retrieval.
+- `enumerator` — replaces the legacy `pgrep -f wpa_supplicant.*<iface>` + kill pattern with `find_supplicant_pids_by_iface()` + `assert_safe_to_kill_supplicant()`. Same for `dhcpcd`.
+- `main.py` — runs `Preflight` at startup; aborts before any thread starts if the configuration would cause lockout.
+
+Adding new wifi-mutating code? Call the guard first. Pattern:
 
 ```python
-# In wifi_scanner.start():
-from core.safety import SSHGuard, SafetyConfig
-guard = SSHGuard(SafetyConfig.from_dict(self.config.get('safety')), interfaces)
+from core.safety import SSHGuard, SafetyConfig, SafetyViolation
+guard = SSHGuard(SafetyConfig.from_dict(config.get('safety')), interfaces)
 try:
-    guard.assert_safe_to_modify(self.interface, operation='monitor mode')
+    guard.assert_safe_to_modify(iface, operation='describe what you do')
 except SafetyViolation as e:
     logger.error(str(e))
-    return  # refuse to start
+    return  # refuse the operation
 ```
-
-And in `enumerator.py`, replace the `pgrep -f wpa_supplicant.*<iface>` + `kill <pid>` block with:
-
-```python
-pids_by_iface = self._enumerate_supplicant_pids()  # parses /proc/<pid>/cmdline
-safe_pids = guard.assert_safe_to_kill_supplicant(pids_by_iface)
-for pid in safe_pids:
-    os.kill(pid, signal.SIGTERM)
-```
-
-Both migrations are pure additions of a check before existing code paths — no behavior change unless the check fires.

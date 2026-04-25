@@ -17,7 +17,7 @@
   },
 
   "wifi": {
-    "_comment": "Two physical paths are supported: dual external adapters (production), or single onboard adapter (RPi Zero 2 W only — see config.rpi_zero2w.json). Interface NAMES are unreliable across reboots when USB adapters swap; populate the *_mac fields after running scripts/detect-wifi-adapters.sh.",
+    "_comment": "Two physical paths are supported: dual external adapters (production), or single onboard adapter (RPi Zero 2 W only — see config.rpi_zero2w.json). Interface NAMES are unreliable across USB reseats; populate the *_mac fields and interface_manager will resolve the iface by MAC at startup. Get the MACs with `ip link show`.",
     "monitor_interface": "wlan1",
     "attack_interface": "wlan2",
     "management_interface": "wlan0",

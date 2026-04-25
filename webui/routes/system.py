@@ -32,7 +32,7 @@ router = APIRouter()
 # Service control
 # ---------------------------------------------------------------------------
 
-_ALLOWED_SERVICES = {"pendonn", "pendonn-web"}
+_ALLOWED_SERVICES = {"pendonn", "pendonn-webui"}
 _ALLOWED_ACTIONS = {"start", "stop", "restart", "status"}
 
 

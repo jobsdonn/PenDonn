@@ -60,8 +60,8 @@ class EvilTwin:
         # Old behavior wrote these to /tmp; CVE-class hazard on multi-user boxes.
         self.hostapd_conf: str = None
         self.dnsmasq_conf: str = None
-        self.captive_portal_dir = "./web/captive_portal"
-        
+
+
     def start_attack(self, ssid, bssid, channel, attack_interface, internet_interface=None):
         """
         Start Evil Twin attack

@@ -1,5 +1,5 @@
 {
-  "_README": "Default PenDonn config. Empty MACs let interface_manager fall back to interface NAMES (less reliable across reboots — set monitor_mac/attack_mac/management_mac after running scripts/detect-wifi-adapters.sh). Empty secret_key triggers a per-startup random secret (sessions reset on restart) — set a persistent value via the installer or run web/app.py once to generate config.json.local. See config/config.example.json for an annotated reference.",
+  "_README": "Default PenDonn config. Empty MACs let interface_manager fall back to interface NAMES (less reliable across USB reseats — set monitor_mac/attack_mac/management_mac to pin by MAC). Empty secret_key triggers a per-startup random secret (sessions reset on restart) — set a persistent value in config.json.local. See config/config.example.json for an annotated reference.",
   "system": {
     "name": "PenDonn",
     "version": "1.0.0",
