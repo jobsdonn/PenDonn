@@ -15,7 +15,11 @@ from core.plugin_manager import PluginBase
 
 class WebScanner(PluginBase):
     """Web vulnerability scanner"""
-    
+
+    def __init__(self, config, *args, **kwargs):
+        super().__init__(config, *args, **kwargs)
+        # Additional initialization if needed
+
     def run(self, scan_id: int, hosts: List[str], scan_results: List[Dict]) -> Dict:
         """
         Scan for web vulnerabilities

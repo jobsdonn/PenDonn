@@ -17,16 +17,27 @@ from core.plugin_manager import PluginManager
 from core.enumerator import NetworkEnumerator
 from core.cracker import PasswordCracker
 
-# Configure logging
+# Configure logging with unbuffered output to prevent log stalling
 log_dir = "./logs"
 os.makedirs(log_dir, exist_ok=True)
+
+# Force unbuffered stdout to prevent logging issues when display is running
+if hasattr(sys.stdout, 'fileno'):
+    try:
+        sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)  # Line buffering
+    except (AttributeError, OSError):
+        pass  # Ignore if stdout can't be reopened (e.g., in some environments)
+
+# Create stream handler with explicit flushing
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(os.path.join(log_dir, 'pendonn.log')),
-        logging.StreamHandler(sys.stdout)
+        stream_handler
     ]
 )
 logger = logging.getLogger(__name__)
@@ -68,12 +79,20 @@ class PenDonn:
         logger.info("Initializing network enumerator...")
         self.enumerator = NetworkEnumerator(self.config, self.db, self.plugin_manager, self.wifi_monitor)
         
-        # Initialize display
+        # Initialize display (with protection against crashes)
         if self.config['display']['enabled']:
             logger.info("Initializing display...")
-            from core.display import Display
-            self.display = Display(self.config, self.db)
+            try:
+                from core.display import Display
+                self.display = Display(self.config, self.db)
+                logger.info("Display initialization complete")
+            except Exception as e:
+                logger.error(f"CRITICAL: Display initialization failed: {e}", exc_info=True)
+                logger.warning("Continuing without display to prevent system crash")
+                logger.warning("To troubleshoot: Set display.enabled=false in config and investigate logs")
+                self.display = None
         else:
+            logger.info("Display disabled in config")
             self.display = None
         
         self.running = False
@@ -132,11 +151,12 @@ class PenDonn:
         if self.display:
             self.display.stop()
         
-        # Close database
+        # Close database connections
         if self.db:
-            self.db.close()
+            self.db.close_all()
         
         logger.info("PenDonn stopped")
+        sys.stdout.flush()  # Final flush
     
     def _status_update(self):
         """Log periodic status update"""
@@ -152,9 +172,12 @@ class PenDonn:
             logger.info(f"Vulnerabilities Found: {stats['vulnerabilities_found']}")
             logger.info(f"  - Critical: {stats['critical_vulnerabilities']}")
             logger.info("=" * 60)
+            
+            # Force flush after status update
+            sys.stdout.flush()
         
         except Exception as e:
-            logger.error(f"Status update error: {e}")
+            logger.error(f"Status update error: {e}", exc_info=True)
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""
@@ -197,6 +220,14 @@ def main():
     try:
         pendonn = PenDonn(config_path)
         pendonn.start()
+        
+        # If start() returns (which it shouldn't for a daemon), log it
+        logger.error("CRITICAL: Main daemon loop exited unexpectedly")
+        logger.error("Service should be running continuously. Check for errors above.")
+        
+        # Keep process alive to allow restart by systemd
+        logger.info("Waiting for systemd restart...")
+        time.sleep(30)
     
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)

@@ -6,8 +6,10 @@ requests==2.31.0
 pillow>=10.3.0
 RPi.GPIO==0.7.1; platform_machine == "armv7l" or platform_machine == "aarch64"
 spidev==3.6; platform_machine == "armv7l" or platform_machine == "aarch64"
+gpiozero==2.0.1; platform_machine == "armv7l" or platform_machine == "aarch64"
 python-nmap==0.7.1
 paramiko==3.3.1
+cryptography==41.0.0
 
 # New plugin dependencies
 dnspython==2.4.2

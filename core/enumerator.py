@@ -124,7 +124,7 @@ class NetworkEnumerator:
                 time.sleep(30)
             
             except Exception as e:
-                logger.error(f"Scan monitor error: {e}")
+                logger.error(f"Scan monitor error: {e}", exc_info=True)
                 time.sleep(10)
     
     def enumerate_network(self, ssid: str, bssid: str, password: str):

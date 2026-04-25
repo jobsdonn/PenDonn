@@ -8,6 +8,7 @@ import sqlite3
 import json
 import os
 import shutil
+import threading
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 import logging
@@ -16,13 +17,15 @@ logger = logging.getLogger(__name__)
 
 
 class Database:
-    """SQLite database handler for PenDonn"""
+    """SQLite database handler for PenDonn with thread-safe connections"""
     
     def __init__(self, db_path: str = "./data/pendonn.db"):
         """Initialize database connection"""
         self.db_path = db_path
         self._ensure_directory()
-        self.conn = None
+        # Use thread-local storage for connections to prevent race conditions
+        self._local = threading.local()
+        self._lock = threading.Lock()  # Lock for database writes
         self.init_database()
     
     def _ensure_directory(self):
@@ -30,146 +33,168 @@ class Database:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
     
     def connect(self):
-        """Create database connection"""
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        return self.conn
+        """Create thread-local database connection"""
+        # Each thread gets its own connection
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            self._local.conn = sqlite3.connect(self.db_path, check_same_thread=True)
+            self._local.conn.row_factory = sqlite3.Row
+            logger.debug(f"Created new database connection for thread {threading.current_thread().name}")
+        return self._local.conn
     
     def _ensure_connection(self):
         """Ensure database connection is valid, reconnect if needed"""
         try:
-            if self.conn is None:
-                return self.connect()
+            conn = self.connect()
             # Test if connection is alive
-            self.conn.execute("SELECT 1")
-            return self.conn
+            conn.execute("SELECT 1")
+            return conn
         except (sqlite3.ProgrammingError, sqlite3.OperationalError):
             # Connection is closed or invalid, reconnect
             logger.warning("Database connection lost, reconnecting...")
+            self._local.conn = None
             return self.connect()
     
     def init_database(self):
         """Initialize database schema"""
-        conn = self.connect()
-        cursor = conn.cursor()
-        
-        # Networks table - stores discovered networks
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS networks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ssid TEXT NOT NULL,
-                bssid TEXT NOT NULL UNIQUE,
-                channel INTEGER,
-                encryption TEXT,
-                signal_strength INTEGER,
-                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_whitelisted BOOLEAN DEFAULT 0,
-                notes TEXT
-            )
-        ''')
-        
-        # Handshakes table - stores captured handshakes
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS handshakes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                network_id INTEGER,
-                bssid TEXT NOT NULL,
-                ssid TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                capture_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                status TEXT DEFAULT 'pending',
-                quality TEXT,
-                FOREIGN KEY (network_id) REFERENCES networks(id)
-            )
-        ''')
-        
-        # Cracked passwords table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS cracked_passwords (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                handshake_id INTEGER,
-                ssid TEXT NOT NULL,
-                bssid TEXT NOT NULL,
-                password TEXT NOT NULL,
-                cracking_engine TEXT,
-                crack_time_seconds INTEGER,
-                cracked_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (handshake_id) REFERENCES handshakes(id)
-            )
-        ''')
-        
-        # Enumeration scans table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS scans (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                network_id INTEGER,
-                ssid TEXT NOT NULL,
-                scan_type TEXT NOT NULL,
-                start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                end_time TIMESTAMP,
-                status TEXT DEFAULT 'running',
-                results TEXT,
-                vulnerabilities_found INTEGER DEFAULT 0,
-                FOREIGN KEY (network_id) REFERENCES networks(id)
-            )
-        ''')
-        
-        # Vulnerabilities table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS vulnerabilities (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scan_id INTEGER,
-                host TEXT NOT NULL,
-                port INTEGER,
-                service TEXT,
-                vulnerability_type TEXT NOT NULL,
-                severity TEXT,
-                description TEXT,
-                plugin_name TEXT,
-                discovered_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (scan_id) REFERENCES scans(id)
-            )
-        ''')
-        
-        # System logs table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS system_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                level TEXT,
-                module TEXT,
-                message TEXT
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
-        logger.info("Database initialized successfully")
+        try:
+            conn = self.connect()
+            cursor = conn.cursor()
+            
+            # Networks table - stores discovered networks
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS networks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ssid TEXT NOT NULL,
+                    bssid TEXT NOT NULL UNIQUE,
+                    channel INTEGER,
+                    encryption TEXT,
+                    signal_strength INTEGER,
+                    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_whitelisted BOOLEAN DEFAULT 0,
+                    notes TEXT
+                )
+            ''')
+            
+            # Handshakes table - stores captured handshakes
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS handshakes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    network_id INTEGER,
+                    bssid TEXT NOT NULL,
+                    ssid TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    capture_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    status TEXT DEFAULT 'pending',
+                    quality TEXT,
+                    FOREIGN KEY (network_id) REFERENCES networks(id)
+                )
+            ''')
+            
+            # Cracked passwords table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS cracked_passwords (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    handshake_id INTEGER,
+                    ssid TEXT NOT NULL,
+                    bssid TEXT NOT NULL,
+                    password TEXT NOT NULL,
+                    cracking_engine TEXT,
+                    crack_time_seconds INTEGER,
+                    cracked_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (handshake_id) REFERENCES handshakes(id)
+                )
+            ''')
+            
+            # Enumeration scans table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS scans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    network_id INTEGER,
+                    ssid TEXT NOT NULL,
+                    scan_type TEXT NOT NULL,
+                    start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    end_time TIMESTAMP,
+                    status TEXT DEFAULT 'running',
+                    results TEXT,
+                    vulnerabilities_found INTEGER DEFAULT 0,
+                    FOREIGN KEY (network_id) REFERENCES networks(id)
+                )
+            ''')
+            
+            # Vulnerabilities table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS vulnerabilities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scan_id INTEGER,
+                    host TEXT NOT NULL,
+                    port INTEGER,
+                    service TEXT,
+                    vulnerability_type TEXT NOT NULL,
+                    severity TEXT,
+                    description TEXT,
+                    plugin_name TEXT,
+                    discovered_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (scan_id) REFERENCES scans(id)
+                )
+            ''')
+            
+            # System logs table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS system_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    level TEXT,
+                    module TEXT,
+                    message TEXT
+                )
+            ''')
+            
+            conn.commit()
+            # Don't close the connection - let it stay open for thread-local use
+            # conn.close()
+            logger.info("Database initialized successfully")
+            
+        except sqlite3.OperationalError as e:
+            if "disk I/O error" in str(e):
+                logger.error("Disk I/O error while initializing database!")
+                logger.error("Possible causes:")
+                logger.error("  - SD card corruption (run: sudo fsck)")
+                logger.error("  - Insufficient disk space")
+                logger.error("  - Filesystem mounted read-only")
+                logger.error("  - Bad SD card sectors")
+                raise RuntimeError(f"Database initialization failed due to disk error: {e}")
+            else:
+                logger.error(f"Database operational error: {e}", exc_info=True)
+                raise
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}", exc_info=True)
+            raise
     
     # Network operations
     def add_network(self, ssid: str, bssid: str, channel: int, 
                    encryption: str, signal_strength: int) -> int:
         """Add or update a discovered network"""
-        conn = self.connect()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO networks (ssid, bssid, channel, encryption, signal_strength, last_seen)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(bssid) DO UPDATE SET
-                signal_strength = excluded.signal_strength,
-                last_seen = CURRENT_TIMESTAMP,
-                channel = excluded.channel,
-                encryption = excluded.encryption,
-                ssid = excluded.ssid
-        ''', (ssid, bssid, channel, encryption, signal_strength))
-        
-        network_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return network_id
-        return network_id
+        with self._lock:  # Protect writes with lock
+            conn = self.connect()
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO networks (ssid, bssid, channel, encryption, signal_strength, last_seen)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(bssid) DO UPDATE SET
+                    signal_strength = excluded.signal_strength,
+                    last_seen = CURRENT_TIMESTAMP,
+                    channel = excluded.channel,
+                    encryption = excluded.encryption,
+                    ssid = excluded.ssid
+            ''', (ssid, bssid, channel, encryption, signal_strength))
+            
+            # Get the network_id (either newly inserted or existing)
+            cursor.execute('SELECT id FROM networks WHERE bssid = ?', (bssid,))
+            network_id = cursor.fetchone()['id']
+            conn.commit()
+            return network_id
     
     def get_networks(self, whitelisted: Optional[bool] = None) -> List[Dict]:
         """Get all networks, optionally filtered by whitelist status"""
@@ -183,7 +208,6 @@ class Database:
                          (1 if whitelisted else 0,))
         
         networks = [dict(row) for row in cursor.fetchall()]
-        conn.close()
         return networks
     
     def get_network_by_bssid(self, bssid: str) -> Optional[Dict]:
@@ -192,7 +216,6 @@ class Database:
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM networks WHERE bssid = ?', (bssid,))
         row = cursor.fetchone()
-        conn.close()
         
         if row:
             return dict(row)
@@ -205,7 +228,6 @@ class Database:
         cursor.execute('UPDATE networks SET is_whitelisted = ? WHERE bssid = ?', 
                       (1 if whitelisted else 0, bssid))
         conn.commit()
-        conn.close()
     
     # Handshake operations
     def add_handshake(self, network_id: int, bssid: str, ssid: str, 
@@ -219,7 +241,6 @@ class Database:
         ''', (network_id, bssid, ssid, file_path, quality))
         handshake_id = cursor.lastrowid
         conn.commit()
-        conn.close()
         logger.info(f"Handshake captured for {ssid} ({bssid})")
         return handshake_id
     
@@ -233,7 +254,6 @@ class Database:
             ORDER BY capture_date ASC
         ''')
         handshakes = [dict(row) for row in cursor.fetchall()]
-        conn.close()
         return handshakes
     
     def get_handshakes_for_network(self, bssid: str) -> List[Dict]:
@@ -242,7 +262,6 @@ class Database:
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM handshakes WHERE bssid = ?', (bssid,))
         handshakes = [dict(row) for row in cursor.fetchall()]
-        conn.close()
         return handshakes
     
     def update_handshake_status(self, handshake_id: int, status: str):
@@ -252,7 +271,6 @@ class Database:
         cursor.execute('UPDATE handshakes SET status = ? WHERE id = ?', 
                       (status, handshake_id))
         conn.commit()
-        conn.close()
     
     # Password operations
     def add_cracked_password(self, handshake_id: int, ssid: str, bssid: str,
@@ -272,7 +290,6 @@ class Database:
         
         password_id = cursor.lastrowid
         conn.commit()
-        conn.close()
         logger.info(f"Password cracked for {ssid} using {engine}")
         return password_id
     
@@ -282,7 +299,6 @@ class Database:
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM cracked_passwords ORDER BY cracked_date DESC')
         passwords = [dict(row) for row in cursor.fetchall()]
-        conn.close()
         return passwords
     
     def get_password_for_network(self, bssid: str) -> Optional[str]:
@@ -292,7 +308,6 @@ class Database:
         cursor.execute('SELECT password FROM cracked_passwords WHERE bssid = ? LIMIT 1', 
                       (bssid,))
         result = cursor.fetchone()
-        conn.close()
         return result['password'] if result else None
     
     # Scan operations
@@ -306,7 +321,6 @@ class Database:
         ''', (network_id, ssid, scan_type))
         scan_id = cursor.lastrowid
         conn.commit()
-        conn.close()
         logger.info(f"Started {scan_type} scan for {ssid}")
         return scan_id
     
@@ -324,7 +338,6 @@ class Database:
             WHERE id = ?
         ''', (status, json.dumps(results), vulnerabilities_found, scan_id))
         conn.commit()
-        conn.close()
     
     def get_scans(self, network_id: Optional[int] = None) -> List[Dict]:
         """Get scan results"""
@@ -338,7 +351,6 @@ class Database:
             cursor.execute('SELECT * FROM scans ORDER BY start_time DESC')
         
         scans = [dict(row) for row in cursor.fetchall()]
-        conn.close()
         return scans
     
     # Vulnerability operations
@@ -355,7 +367,6 @@ class Database:
         ''', (scan_id, host, port, service, vuln_type, severity, description, plugin_name))
         vuln_id = cursor.lastrowid
         conn.commit()
-        conn.close()
         logger.warning(f"Vulnerability found: {vuln_type} on {host}:{port} - {severity}")
         return vuln_id
     
@@ -380,7 +391,6 @@ class Database:
         cursor.execute(query, params)
         
         vulns = [dict(row) for row in cursor.fetchall()]
-        conn.close()
         return vulns
     
     # Statistics
@@ -419,7 +429,6 @@ class Database:
         cursor.execute('SELECT COUNT(*) as count FROM vulnerabilities WHERE severity = "critical"')
         stats['critical_vulnerabilities'] = cursor.fetchone()['count']
         
-        conn.close()
         return stats
     
     # Export and reset
@@ -442,8 +451,6 @@ class Database:
         for table in ['networks', 'handshakes', 'cracked_passwords', 'scans', 'vulnerabilities']:
             cursor.execute(f'SELECT * FROM {table}')
             export_data[table] = [dict(row) for row in cursor.fetchall()]
-        
-        conn.close()
         
         # Write to file
         os.makedirs(os.path.dirname(export_path) if os.path.dirname(export_path) else '.', exist_ok=True)
@@ -525,9 +532,19 @@ class Database:
             raise
     
     def close(self):
-        """Close database connection"""
-        if self.conn:
-            self.conn.close()
+        """Close database connection for current thread"""
+        if hasattr(self._local, 'conn') and self._local.conn:
+            try:
+                self._local.conn.close()
+                self._local.conn = None
+                logger.debug(f"Closed database connection for thread {threading.current_thread().name}")
+            except Exception as e:
+                logger.error(f"Error closing database connection: {e}", exc_info=True)
+    
+    def close_all(self):
+        """Close all database connections (call during shutdown)"""
+        # Close the current thread's connection
+        self.close()
 
 
 # CLI for database initialization

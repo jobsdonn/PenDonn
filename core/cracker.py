@@ -236,7 +236,7 @@ class PasswordCracker:
             except queue.Empty:
                 continue
             except Exception as e:
-                logger.error(f"Worker {worker_id} error: {e}")
+                logger.error(f"Worker {worker_id} error: {e}", exc_info=True)
                 time.sleep(1)
     
     def _crack_with_john(self, handshake: Dict) -> Optional[tuple]:

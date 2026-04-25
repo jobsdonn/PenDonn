@@ -10,6 +10,30 @@
 
 set -e
 
+# CRITICAL: Determine project root FIRST, before any directory changes
+INITIAL_PWD="$PWD"
+if [ -n "${BASH_SOURCE[0]}" ] && [[ "${BASH_SOURCE[0]}" == */* ]]; then
+    # Script has path in it
+    SCRIPT_LOCATION="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SCRIPT_DIR="$SCRIPT_LOCATION"
+elif [ -f "$PWD/install.sh" ]; then
+    # Running from project root
+    SCRIPT_DIR="$PWD"
+elif [ -f "$PWD/../install.sh" ]; then
+    # Running from subdirectory
+    SCRIPT_DIR="$(dirname "$PWD")"
+else
+    # Search up directory tree
+    SEARCH_DIR="$PWD"
+    while [ "$SEARCH_DIR" != "/" ]; do
+        if [ -f "$SEARCH_DIR/requirements.txt" ] && [ -d "$SEARCH_DIR/core" ]; then
+            SCRIPT_DIR="$SEARCH_DIR"
+            break
+        fi
+        SEARCH_DIR="$(dirname "$SEARCH_DIR")"
+    done
+fi
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -171,6 +195,7 @@ echo "  5) RTL8821CU      - Realtek 8821CU chipset"
 echo "  6) MT7612U        - Alfa AWUS036ACM, Panda PAU0D"
 echo "  7) RT5370         - Ralink RT5370 (built into many adapters)"
 echo "  8) AR9271         - Atheros AR9271 (TP-Link TL-WN722N v1)"
+echo "  9) RTL8852BU      - Realtek 8852BU chipset (Wi-Fi 6)"
 echo "  a) Install ALL drivers (takes 10-15 minutes)"
 echo "  s) Skip driver installation"
 echo ""
@@ -193,7 +218,7 @@ else
     # RTL8188EU/RTL8188EUS (TP-Link TL-WN722N v2/v3, many cheap adapters)
     if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 1 ]]; then
         if ! lsmod | grep -q 8188eu; then
-            echo -e "${BLUE}[1/8] Installing RTL8188EU driver...${NC}"
+            echo -e "${BLUE}[1/9] Installing RTL8188EU driver...${NC}"
             cd /tmp
             rm -rf rtl8188eus 2>/dev/null
             if git clone --depth 1 https://github.com/aircrack-ng/rtl8188eus.git; then
@@ -208,14 +233,14 @@ else
                 print_warning "Failed to download RTL8188EU driver"
             fi
         else
-            echo -e "${GREEN}[1/8] RTL8188EU driver already present${NC}"
+            echo -e "${GREEN}[1/9] RTL8188EU driver already present${NC}"
         fi
     fi
 
     # Realtek RTL8812AU/RTL8821AU (Alfa AWUS036ACH, AWUS036AC, many dual-band adapters)
     if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 2 ]]; then
         if ! lsmod | grep -q 8812au; then
-            echo -e "${BLUE}[2/8] Installing RTL8812AU driver...${NC}"
+            echo -e "${BLUE}[2/9] Installing RTL8812AU driver...${NC}"
             cd /tmp
             rm -rf rtl8812au 2>/dev/null
             if git clone --depth 1 https://github.com/aircrack-ng/rtl8812au.git; then
@@ -230,14 +255,14 @@ else
                 print_warning "Failed to download RTL8812AU driver"
             fi
         else
-            echo -e "${GREEN}[2/8] RTL8812AU driver already present${NC}"
+            echo -e "${GREEN}[2/9] RTL8812AU driver already present${NC}"
         fi
     fi
 
     # Realtek RTL8814AU (Alfa AWUS1900, high-power adapters)
     if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 3 ]]; then
         if ! lsmod | grep -q 8814au; then
-            echo -e "${BLUE}[3/8] Installing RTL8814AU driver...${NC}"
+            echo -e "${BLUE}[3/9] Installing RTL8814AU driver...${NC}"
             cd /tmp
             rm -rf rtl8814au 2>/dev/null
             if git clone --depth 1 https://github.com/aircrack-ng/rtl8814au.git; then
@@ -252,14 +277,14 @@ else
                 print_warning "Failed to download RTL8814AU driver"
             fi
         else
-            echo -e "${GREEN}[3/8] RTL8814AU driver already present${NC}"
+            echo -e "${GREEN}[3/9] RTL8814AU driver already present${NC}"
         fi
     fi
 
     # Realtek RTL8822BU
     if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 4 ]]; then
         if ! lsmod | grep -q 8822bu; then
-            echo -e "${BLUE}[4/8] Installing RTL8822BU driver...${NC}"
+            echo -e "${BLUE}[4/9] Installing RTL8822BU driver...${NC}"
             cd /tmp
             rm -rf 88x2bu-20210702 2>/dev/null
             if git clone --depth 1 https://github.com/morrownr/88x2bu-20210702.git; then
@@ -274,14 +299,14 @@ else
                 print_warning "Failed to download RTL8822BU driver"
             fi
         else
-            echo -e "${GREEN}[4/8] RTL8822BU driver already present${NC}"
+            echo -e "${GREEN}[4/9] RTL8822BU driver already present${NC}"
         fi
     fi
 
     # Realtek RTL8821CU
     if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 5 ]]; then
         if ! lsmod | grep -q 8821cu; then
-            echo -e "${BLUE}[5/8] Installing RTL8821CU driver...${NC}"
+            echo -e "${BLUE}[5/9] Installing RTL8821CU driver...${NC}"
             cd /tmp
             rm -rf 8821cu 2>/dev/null
             if git clone --depth 1 https://github.com/brektrou/rtl8821CU.git 8821cu; then
@@ -296,14 +321,14 @@ else
                 print_warning "Failed to download RTL8821CU driver"
             fi
         else
-            echo -e "${GREEN}[5/8] RTL8821CU driver already present${NC}"
+            echo -e "${GREEN}[5/9] RTL8821CU driver already present${NC}"
         fi
     fi
 
     # MediaTek MT7612U (Alfa AWUS036ACM, Panda PAU0D)
     if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 6 ]]; then
         if ! lsmod | grep -q mt76x2u; then
-            echo -e "${BLUE}[6/8] Installing MT7612U driver...${NC}"
+            echo -e "${BLUE}[6/9] Installing MT7612U driver...${NC}"
             cd /tmp
             rm -rf mt7612u 2>/dev/null
             if git clone --depth 1 https://github.com/aircrack-ng/rtl8812au.git mt7612u; then
@@ -318,29 +343,63 @@ else
                 print_warning "Failed to download MT7612U driver"
             fi
         else
-            echo -e "${GREEN}[6/8] MT7612U driver already present${NC}"
+            echo -e "${GREEN}[6/9] MT7612U driver already present${NC}"
         fi
     fi
 
     # Ralink RT5370 (Built into many adapters, usually works but may need update)
     if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 7 ]]; then
         if ! lsmod | grep -q rt2800usb; then
-            echo -e "${BLUE}[7/8] Loading RT5370 driver...${NC}"
+            echo -e "${BLUE}[7/9] Loading RT5370 driver...${NC}"
             modprobe rt2800usb
             print_success "RT5370 driver loaded"
         else
-            echo -e "${GREEN}[7/8] RT5370 driver already present${NC}"
+            echo -e "${GREEN}[7/9] RT5370 driver already present${NC}"
         fi
     fi
 
     # Atheros AR9271 (TP-Link TL-WN722N v1)
     if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 8 ]]; then
         if ! lsmod | grep -q ath9k_htc; then
-            echo -e "${BLUE}[8/8] Loading AR9271 driver...${NC}"
+            echo -e "${BLUE}[8/9] Loading AR9271 driver...${NC}"
             modprobe ath9k_htc
             print_success "AR9271 driver loaded"
         else
-            echo -e "${GREEN}[8/8] AR9271 driver already present${NC}"
+            echo -e "${GREEN}[8/9] AR9271 driver already present${NC}"
+        fi
+    fi
+
+    # Realtek RTL8852AU (Wi-Fi 6)
+    if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 9 ]]; then
+        if ! lsmod | grep -q 8852au; then
+            echo -e "${BLUE}[9/9] Installing RTL8852AU driver...${NC}"
+            cd /tmp
+            rm -rf rtl8852au 2>/dev/null
+            if git clone --depth 1 https://github.com/lwfinger/rtl8852au.git; then
+                cd rtl8852au
+                # Create required directory for systemd-sleep scripts
+                mkdir -p /usr/lib/systemd/system-sleep
+                # Detect architecture and set build parameters
+                ARCH=$(uname -m)
+                echo -e "${BLUE}Building for architecture: $ARCH${NC}"
+                if [[ "$ARCH" == "aarch64" ]] || [[ "$ARCH" == "arm64" ]]; then
+                    # ARM64 architecture (Raspberry Pi 4/5)
+                    make ARCH=arm64 -j$(nproc) && make ARCH=arm64 install
+                else
+                    # x86_64 or other architectures
+                    make -j$(nproc) && make install
+                fi
+                if [ $? -eq 0 ]; then
+                    print_success "RTL8852AU driver installed"
+                else
+                    print_warning "RTL8852AU driver compilation failed (non-critical)"
+                fi
+                cd /tmp && rm -rf rtl8852au
+            else
+                print_warning "Failed to download RTL8852AU driver"
+            fi
+        else
+            echo -e "${GREEN}[9/9] RTL8852AU driver already present${NC}"
         fi
     fi
 
@@ -350,8 +409,14 @@ fi
 # Prepare installation directory
 print_status "Preparing installation directory..."
 
-# Get the script's directory first
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Verify we found the project root
+if [ -z "$SCRIPT_DIR" ] || [ ! -f "$SCRIPT_DIR/requirements.txt" ]; then
+    print_error "Could not find project root!"
+    print_error "Looking for requirements.txt in: ${SCRIPT_DIR:-'(not set)'}"
+    print_error "Please run this script from the project directory"
+    exit 1
+fi
+
 echo -e "${BLUE}Source directory: $SCRIPT_DIR${NC}"
 echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
 
@@ -404,11 +469,11 @@ ls -la "$SCRIPT_DIR" | head -10
 
 if command -v rsync &> /dev/null; then
     echo -e "${BLUE}Using rsync for file copy...${NC}"
-    rsync -rlptgoD --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data/' --exclude='logs/' --exclude='handshakes/' "$SCRIPT_DIR/" "$INSTALL_DIR/"
+    rsync -rlptgoD --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data/' --exclude='logs/' --exclude='handshakes/' --exclude='scripts/' "$SCRIPT_DIR/" "$INSTALL_DIR/"
 else
     # Fallback to tar for more reliable copying
     echo -e "${BLUE}Using tar for file copy...${NC}"
-    tar --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data' --exclude='logs' --exclude='handshakes' -cf - . | (cd "$INSTALL_DIR" && tar -xf -)
+    tar --exclude='.venv' --exclude='venv' --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='data' --exclude='logs' --exclude='handshakes' --exclude='scripts' -cf - . | (cd "$INSTALL_DIR" && tar -xf -)
 fi
 
 print_success "Files copied"
@@ -435,10 +500,99 @@ print_success "Virtual environment created"
 
 # Install Python packages
 print_status "Installing Python dependencies (this may take a few minutes)..."
-pip install --upgrade pip
+pip install --upgrade pip setuptools wheel
 echo -e "${YELLOW}Installing packages from requirements.txt...${NC}"
 pip install -r requirements.txt
 print_success "Python dependencies installed"
+
+# Install Waveshare E-Paper display library
+print_status "Installing Waveshare E-Paper display library..."
+cd /tmp
+if [ -d "e-Paper" ]; then
+    rm -rf e-Paper
+fi
+
+if git clone --depth 1 https://github.com/waveshare/e-Paper.git 2>&1 | grep -v "^Cloning"; then
+    if [ -d "e-Paper/RaspberryPi_JetsonNano/python" ]; then
+        cd e-Paper/RaspberryPi_JetsonNano/python
+        
+        # Copy library to system location for both venv and system Python
+        print_status "Copying Waveshare library to /usr/local/lib..."
+        mkdir -p /usr/local/lib/python3/dist-packages
+        if [ -d "lib/waveshare_epd" ]; then
+            # Show what we're about to copy
+            echo -e "${BLUE}Files in source lib/waveshare_epd:${NC}"
+            ls -la lib/waveshare_epd/ | grep epd7 | head -n 5
+            
+            # Copy the entire waveshare_epd package directory
+            cp -r lib/waveshare_epd /usr/local/lib/python3/dist-packages/
+            
+            # Also create symbolic link for backward compatibility
+            mkdir -p /usr/local/lib/waveshare_epd
+            cp -r lib/waveshare_epd/* /usr/local/lib/waveshare_epd/
+            
+            # Verify __init__.py exists
+            if [ -f "/usr/local/lib/python3/dist-packages/waveshare_epd/__init__.py" ]; then
+                print_success "Waveshare library files copied with package structure"
+            else
+                print_warning "Waveshare __init__.py not found - import may fail"
+            fi
+        else
+            print_error "Waveshare library source not found at lib/waveshare_epd"
+        fi
+        
+        # Install into virtual environment's site-packages
+        print_status "Installing Waveshare library into virtual environment..."
+        source "$INSTALL_DIR/venv/bin/activate"
+        
+        # Get venv site-packages directory
+        VENV_SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
+        print_status "Target directory: $VENV_SITE_PACKAGES"
+        
+        if [ -d "lib/waveshare_epd" ]; then
+            # Copy the entire package directory (don't pipe to head - it kills the copy!)
+            print_status "Copying waveshare_epd package..."
+            cp -r lib/waveshare_epd "$VENV_SITE_PACKAGES/" 2>&1 | tail -n 3
+            
+            # Verify files were copied
+            if [ -f "$VENV_SITE_PACKAGES/waveshare_epd/__init__.py" ]; then
+                # Check if __init__.py is empty (common issue)
+                if [ ! -s "$VENV_SITE_PACKAGES/waveshare_epd/__init__.py" ]; then
+                    print_status "Creating minimal __init__.py..."
+                    echo '# Waveshare EPD Library' > "$VENV_SITE_PACKAGES/waveshare_epd/__init__.py"
+                fi
+                print_success "Waveshare library copied to venv site-packages"
+                
+                # Verify epd7in3e.py was copied
+                if [ -f "$VENV_SITE_PACKAGES/waveshare_epd/epd7in3e.py" ]; then
+                    print_success "✓ epd7in3e.py found!"
+                    print_success "✓ Waveshare display library installed"
+                    print_status "Note: Display requires GPIO access and will initialize when service runs"
+                else
+                    print_error "✗ epd7in3e.py NOT copied! Check disk space and permissions"
+                    print_warning "Display will use simulation mode"
+                fi
+            else
+                print_error "Failed to copy Waveshare files to $VENV_SITE_PACKAGES"
+            fi
+        else
+            print_error "Waveshare library source not found at lib/waveshare_epd"
+            print_error "Current directory: $(pwd)"
+            ls -la lib/ 2>&1 | head -n 10
+        fi
+        
+        deactivate
+        
+        cd /tmp
+        rm -rf e-Paper
+    else
+        print_warning "Waveshare library structure unexpected, skipping"
+    fi
+else
+    print_warning "Could not download Waveshare library (display will use simulation mode)"
+fi
+
+cd "$INSTALL_DIR"
 
 # Download rockyou wordlist
 print_status "Downloading rockyou.txt wordlist (140MB, may take a while)..."
@@ -497,16 +651,52 @@ EOF
 
 print_success "Systemd service files created"
 
+# Check disk space before initializing database
+print_status "Checking available disk space..."
+AVAILABLE_KB=$(df "$INSTALL_DIR" | awk 'NR==2 {print $4}')
+AVAILABLE_MB=$((AVAILABLE_KB / 1024))
+if [ "$AVAILABLE_MB" -lt 100 ]; then
+    print_error "Insufficient disk space: ${AVAILABLE_MB}MB available (need 100MB minimum)"
+    print_error "Free up space on your SD card and try again"
+    exit 1
+fi
+print_success "Disk space OK: ${AVAILABLE_MB}MB available"
+
+# Ensure data directory exists and has proper permissions
+mkdir -p "$INSTALL_DIR/data"
+chmod 755 "$INSTALL_DIR/data"
+
 # Initialize database
 print_status "Initializing database..."
-$INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/core/database.py --init
-print_success "Database initialized"
+if $INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/core/database.py --init 2>&1 | tee /tmp/db_init.log; then
+    print_success "Database initialized"
+else
+    print_error "Database initialization failed!"
+    echo -e "${RED}Error details:${NC}"
+    cat /tmp/db_init.log
+    print_error "This could be due to:"
+    print_error "  - SD card corruption (run: sudo fsck)"
+    print_error "  - Insufficient disk space"
+    print_error "  - Filesystem mounted read-only"
+    exit 1
+fi
 
 # Set permissions
 print_status "Setting permissions..."
 chmod +x "$INSTALL_DIR/main.py"
 chmod +x "$INSTALL_DIR/web/app.py"
 chmod 600 "$INSTALL_DIR/config/config.json"
+
+# Ensure data directory exists and is writable
+mkdir -p "$INSTALL_DIR/data"
+chmod 755 "$INSTALL_DIR/data"
+chown root:root "$INSTALL_DIR/data"
+
+# Ensure logs directory exists and is writable
+mkdir -p "$INSTALL_DIR/logs"
+chmod 755 "$INSTALL_DIR/logs"
+chown root:root "$INSTALL_DIR/logs"
+
 print_success "Permissions set"
 
 # Enable services
@@ -722,9 +912,9 @@ print('Config updated: web.port = $WEB_PORT, secret_key generated')
     AUTO_CRACK=${AUTO_CRACK:-yes}
     
     # Use Python to update JSON reliably
-    AUTO_CRACK_VALUE="true"
+    AUTO_CRACK_VALUE="True"
     if [ "$AUTO_CRACK" = "no" ]; then
-        AUTO_CRACK_VALUE="false"
+        AUTO_CRACK_VALUE="False"
         echo -e "${YELLOW}Auto-cracking disabled${NC}"
     else
         echo -e "${GREEN}Auto-cracking enabled${NC}"
@@ -738,7 +928,7 @@ with open('$CONFIG_FILE', 'r') as f:
 config['cracking']['auto_start_cracking'] = $AUTO_CRACK_VALUE
 with open('$CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2)
-print('Config updated: auto_start_cracking = $AUTO_CRACK_VALUE')
+print('Config updated: auto_start_cracking = ' + str($AUTO_CRACK_VALUE))
 "
     
     echo ""
@@ -749,9 +939,9 @@ print('Config updated: auto_start_cracking = $AUTO_CRACK_VALUE')
     HAS_DISPLAY=${HAS_DISPLAY:-no}
     
     # Use Python to update JSON reliably
-    DISPLAY_ENABLED="false"
+    DISPLAY_ENABLED="False"
     if [ "$HAS_DISPLAY" = "yes" ]; then
-        DISPLAY_ENABLED="true"
+        DISPLAY_ENABLED="True"
         echo -e "${GREEN}Display enabled${NC}"
     else
         echo -e "${YELLOW}Display disabled (headless mode)${NC}"
@@ -765,7 +955,7 @@ with open('$CONFIG_FILE', 'r') as f:
 config['display']['enabled'] = $DISPLAY_ENABLED
 with open('$CONFIG_FILE', 'w') as f:
     json.dump(config, f, indent=2)
-print('Config updated: display.enabled = $DISPLAY_ENABLED')
+print('Config updated: display.enabled = ' + str($DISPLAY_ENABLED))
 "
     
     echo ""
@@ -931,4 +1121,22 @@ echo -e "  • wlan1 = Monitor interface (scans networks)"
 echo -e "  • wlan2 = Attack interface (captures handshakes)"
 echo ""
 echo -e "${GREEN}Installation complete! Configure before starting services.${NC}"
+echo ""
+echo -e "${BLUE}Checking service status...${NC}"
+sleep 2
+systemctl status pendonn --no-pager -n 10 || true
+echo ""
+echo -e "${YELLOW}Recent logs (if service started):${NC}"
+journalctl -u pendonn -n 30 --no-pager 2>/dev/null || echo "  (No logs yet - service may not have started)"
+echo ""
+echo -e "${YELLOW}Useful commands:${NC}"
+echo "  • Check status:     sudo systemctl status pendonn"
+echo "  • View live logs:   sudo journalctl -u pendonn -f"
+echo "  • Check errors:     sudo journalctl -u pendonn -p err"
+echo "  • Restart service:  sudo systemctl restart pendonn"
+echo "  • Web UI:           http://$(hostname -I | awk '{print $1}'):8080"
+echo "  • Health check:     cd $INSTALL_DIR && sudo ./check_health.py"
+echo "  • Display test:     cd $INSTALL_DIR && sudo ./diagnose_display.py"
+echo ""
+echo -e "${RED}REMINDER: Only use on networks you own or have permission to test!${NC}"
 echo ""

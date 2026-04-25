@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class PluginBase(ABC):
     """Base class for all PenDonn plugins"""
     
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, *args, **kwargs):
         """Initialize plugin with configuration"""
         self.config = config
         self.name = config.get('name', 'Unknown Plugin')
@@ -24,6 +24,9 @@ class PluginBase(ABC):
         self.description = config.get('description', '')
         self.author = config.get('author', '')
         self.enabled = config.get('enabled', True)
+        # Additional arguments can be handled here if needed
+        self.extra_args = args
+        self.extra_kwargs = kwargs
     
     @abstractmethod
     def run(self, scan_id: int, hosts: List[str], scan_results: List[Dict]) -> Dict:
@@ -144,9 +147,12 @@ class PluginManager:
             plugin_class = getattr(module, plugin_class_name)
             
             # Instantiate plugin
-            plugin_instance = plugin_class(plugin_config)
-            plugin_instance.db = self.db  # Provide database access
-            
+            try:
+                plugin_instance = plugin_class(plugin_config, self.db)  # Pass `db` during initialization
+            except TypeError as e:
+                logger.error(f"Failed to initialize plugin {plugin_config['name']}: {e}")
+                return
+
             self.plugins.append(plugin_instance)
             logger.info(f"Loaded plugin: {plugin_config['name']} v{plugin_config.get('version', '1.0.0')}")
         

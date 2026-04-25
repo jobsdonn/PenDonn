@@ -115,11 +115,13 @@ By downloading, installing, or using this software, you agree that:
 
 3. **The installer will:**
    - ✅ Install all system dependencies
+   - ✅ Enable SPI interface for display support
+   - ✅ Install Waveshare E-Paper display library
    - ✅ Set up Python virtual environment
    - ✅ Download wordlists (rockyou.txt)
    - ✅ Configure systemd services
    - ✅ Initialize the database
-   - ✅ Detect WiFi interfaces
+   - ✅ Detect WiFi interfaces by MAC address
    - ✅ Start services automatically
 
 #### For Development/Testing (Windows/Linux/macOS):

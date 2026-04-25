@@ -155,8 +155,27 @@ class WiFiScanner:
         """Start WiFi scanner"""
         logger.info("Starting WiFi scanner...")
         
-        # Enable monitor mode
-        self._enable_monitor_mode(self.interface)
+        # Validate interface exists before trying to use it
+        try:
+            result = subprocess.run(['ip', 'link', 'show', self.interface],
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                logger.error(f"Interface {self.interface} does not exist!")
+                logger.error("Available interfaces:")
+                subprocess.run(['ip', 'link', 'show'], check=False)
+                logger.error("WiFi scanner cannot start without valid interface")
+                return
+        except Exception as e:
+            logger.error(f"Failed to validate interface {self.interface}: {e}", exc_info=True)
+            return
+        
+        # Enable monitor mode with error handling
+        try:
+            self._enable_monitor_mode(self.interface)
+        except Exception as e:
+            logger.error(f"Failed to enable monitor mode on {self.interface}: {e}", exc_info=True)
+            logger.error("WiFi scanner cannot start without monitor mode")
+            return
         
         self.running = True
         
@@ -174,12 +193,6 @@ class WiFiScanner:
         """Stop WiFi scanner"""
         logger.info("Stopping WiFi scanner...")
         self.running = False
-        
-        # Stop all active captures
-        for bssid in list(self.active_captures.keys()):
-            self._stop_capture(bssid)
-        
-        time.sleep(2)
         logger.info("WiFi scanner stopped")
     
     def _enable_monitor_mode(self, interface: str):
@@ -191,14 +204,37 @@ class WiFiScanner:
             # subprocess.run(['airmon-ng', 'check', 'kill'], 
             #              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # Enable monitor mode
-            subprocess.run(['ip', 'link', 'set', interface, 'down'], check=True)
-            subprocess.run(['iw', interface, 'set', 'monitor', 'none'], check=True)
-            subprocess.run(['ip', 'link', 'set', interface, 'up'], check=True)
+            # Check if interface is already in monitor mode
+            result = subprocess.run(['iw', interface, 'info'], 
+                                  capture_output=True, text=True, timeout=5)
+            if 'type monitor' in result.stdout.lower():
+                logger.info(f"✓ {interface} already in monitor mode")
+                return
             
-            logger.info(f"✓ Monitor mode enabled on {interface}")
+            # Enable monitor mode
+            subprocess.run(['ip', 'link', 'set', interface, 'down'], check=True, timeout=10)
+            subprocess.run(['iw', interface, 'set', 'monitor', 'none'], check=True, timeout=10)
+            subprocess.run(['ip', 'link', 'set', interface, 'up'], check=True, timeout=10)
+            
+            # Verify monitor mode was enabled
+            result = subprocess.run(['iw', interface, 'info'], 
+                                  capture_output=True, text=True, timeout=5)
+            if 'type monitor' in result.stdout.lower():
+                logger.info(f"✓ Monitor mode enabled on {interface}")
+            else:
+                logger.error(f"Monitor mode may not be properly enabled on {interface}")
+                raise RuntimeError(f"Failed to verify monitor mode on {interface}")
+                
+        except subprocess.TimeoutExpired as e:
+            logger.error(f"Timeout while enabling monitor mode on {interface}: {e}", exc_info=True)
+            raise
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Command failed while enabling monitor mode: {e}", exc_info=True)
+            logger.error(f"stdout: {e.stdout if hasattr(e, 'stdout') else 'N/A'}")
+            logger.error(f"stderr: {e.stderr if hasattr(e, 'stderr') else 'N/A'}")
+            raise
         except Exception as e:
-            logger.error(f"Failed to enable monitor mode: {e}")
+            logger.error(f"Failed to enable monitor mode: {e}", exc_info=True)
             raise
     
     def _scan_loop(self):
@@ -207,14 +243,20 @@ class WiFiScanner:
         
         while self.running:
             try:
-                # Skip scanning if enumeration is active
-                if self.enumeration_active:
+                # Skip scanning if enumeration is active (thread-safe check)
+                with self.enumeration_lock:
+                    enum_active = self.enumeration_active
+                
+                if enum_active:
                     logger.debug("Skipping scan - enumeration active")
                     time.sleep(2)
                     continue
                 
-                # Skip scanning if handshake capture is active
-                if len(self.active_captures) > 0:
+                # Skip scanning if handshake capture is active (thread-safe check)
+                with self.enumeration_lock:
+                    has_active_captures = len(self.active_captures) > 0
+                
+                if has_active_captures:
                     logger.debug("Skipping scan - handshake capture active")
                     time.sleep(2)
                     continue
@@ -267,7 +309,7 @@ class WiFiScanner:
                 self._cleanup_old_scans()
                 
             except Exception as e:
-                logger.error(f"Scan error: {e}")
+                logger.error(f"Scan error: {e}", exc_info=True)
                 time.sleep(5)
     
     def _parse_scan_results(self, csv_file: str):
@@ -515,15 +557,16 @@ class WiFiScanner:
     def _start_handshake_capture(self, bssid: str, ssid: str, channel: int):
         """Start capturing handshake for a network"""
         try:
-            # Skip if enumeration is using the attack interface
-            if self.enumeration_active:
-                logger.debug(f"Skipping capture for {ssid} - enumeration in progress")
-                return
-            
-            # Limit to one capture at a time (wlan2 can only be on one channel)
-            if len(self.active_captures) > 0:
-                logger.debug(f"Skipping capture for {ssid} - already capturing another network")
-                return
+            # Skip if enumeration is using the attack interface (thread-safe check)
+            with self.enumeration_lock:
+                if self.enumeration_active:
+                    logger.debug(f"Skipping capture for {ssid} - enumeration in progress")
+                    return
+                
+                # Limit to one capture at a time (wlan2 can only be on one channel)
+                if len(self.active_captures) > 0:
+                    logger.debug(f"Skipping capture for {ssid} - already capturing another network")
+                    return
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             bssid_clean = bssid.replace(':', '')
@@ -558,6 +601,7 @@ class WiFiScanner:
             # Airodump creates -01.cap file regardless of format setting
             capture_file = capture_base + '-01.cap'
             
+            # Add to active captures inside the lock
             self.active_captures[bssid] = {
                 'ssid': ssid,
                 'channel': channel,
@@ -574,7 +618,7 @@ class WiFiScanner:
                            args=(bssid, channel), daemon=True).start()
         
         except Exception as e:
-            logger.error(f"Failed to start capture for {ssid}: {e}")
+            logger.error(f"Failed to start capture for {ssid}: {e}", exc_info=True)
     
     def _send_deauth_delayed(self, bssid: str, channel: int):
         """Send deauth packets after delay"""
@@ -762,10 +806,11 @@ class WiFiScanner:
     
     def _finalize_capture(self, bssid: str, success: bool):
         """Finalize a handshake capture"""
-        if bssid not in self.active_captures:
-            return
-        
-        capture_info = self.active_captures[bssid]
+        with self.enumeration_lock:
+            if bssid not in self.active_captures:
+                return
+            
+            capture_info = self.active_captures[bssid]
         ssid = capture_info['ssid']
         
         # Stop airodump process
@@ -808,8 +853,8 @@ class WiFiScanner:
             except:
                 pass
         
-        # Remove from active captures
-        del self.active_captures[bssid]
+            # Remove from active captures (still inside lock)
+            del self.active_captures[bssid]
     
     def _stop_capture(self, bssid: str):
         """Stop an active capture"""
