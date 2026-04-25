@@ -1,0 +1,310 @@
+"""Logs (SSE stream) + service control + dangerous ops (database reset).
+
+Service-control and journalctl-streaming both require systemctl/journalctl
+on the host, so they no-op gracefully on dev machines (Windows/macOS).
+The endpoints return a clear "not available on this platform" response
+rather than erroring — keeps the UI testable in a non-Pi environment.
+
+The database-reset endpoint requires the operator to type the word RESET
+into the form (a `confirm_phrase` field) — defends against accidental
+clicks even after the main confirm modal.
+"""
+
+import asyncio
+import json
+import os
+import platform
+import shutil
+import subprocess
+import time
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import StreamingResponse
+
+from webui.auth import require_login
+
+router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Service control
+# ---------------------------------------------------------------------------
+
+_ALLOWED_SERVICES = {"pendonn", "pendonn-web"}
+_ALLOWED_ACTIONS = {"start", "stop", "restart", "status"}
+
+
+def _have_systemctl() -> bool:
+    return platform.system() == "Linux" and shutil.which("systemctl") is not None
+
+
+def _service_status(name: str) -> str:
+    """Return 'active' / 'inactive' / 'failed' / 'unknown' / 'unavailable'."""
+    if not _have_systemctl():
+        return "unavailable"
+    try:
+        r = subprocess.run(
+            ["systemctl", "is-active", name],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        return (r.stdout or "").strip() or "unknown"
+    except (subprocess.SubprocessError, OSError):
+        return "unknown"
+
+
+@router.get("/partials/services")
+def services_partial(request: Request, username: str = Depends(require_login)):
+    statuses = {svc: _service_status(svc) for svc in _ALLOWED_SERVICES}
+    return request.app.state.templates.TemplateResponse(
+        "partials/services.html",
+        {"request": request, "statuses": statuses, "have_systemctl": _have_systemctl()},
+    )
+
+
+@router.post("/services/{service}/{action}")
+def service_action(
+    request: Request,
+    service: str,
+    action: str,
+    username: str = Depends(require_login),
+):
+    if service not in _ALLOWED_SERVICES:
+        raise HTTPException(status_code=400, detail=f"unknown service: {service}")
+    if action not in _ALLOWED_ACTIONS:
+        raise HTTPException(status_code=400, detail=f"unknown action: {action}")
+    if not _have_systemctl():
+        # Return a partial that shows the platform-unavailable state
+        return request.app.state.templates.TemplateResponse(
+            "partials/services.html",
+            {
+                "request": request,
+                "statuses": {svc: "unavailable" for svc in _ALLOWED_SERVICES},
+                "have_systemctl": False,
+                "last_action_message": f"systemctl not available on this host — '{action} {service}' was not executed",
+            },
+        )
+    try:
+        r = subprocess.run(
+            ["systemctl", action, service],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        msg = f"{action} {service}: " + ("ok" if r.returncode == 0 else f"exit {r.returncode}")
+        if r.stderr.strip():
+            msg += f" — {r.stderr.strip()[:200]}"
+    except subprocess.TimeoutExpired:
+        msg = f"{action} {service}: timeout (15s)"
+    except OSError as e:
+        msg = f"{action} {service}: {e}"
+    statuses = {svc: _service_status(svc) for svc in _ALLOWED_SERVICES}
+    return request.app.state.templates.TemplateResponse(
+        "partials/services.html",
+        {
+            "request": request,
+            "statuses": statuses,
+            "have_systemctl": True,
+            "last_action_message": msg,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Logs page + SSE stream
+# ---------------------------------------------------------------------------
+
+@router.get("/logs")
+def logs_page(request: Request, username: str = Depends(require_login)):
+    return request.app.state.templates.TemplateResponse(
+        "logs.html",
+        {
+            "request": request,
+            "username": username,
+            "active_nav": "logs",
+            "have_systemctl": _have_systemctl(),
+        },
+    )
+
+
+def _journalctl_lines(service: str, n: int = 50):
+    """Yield recent journal lines. Empty iter on non-Linux."""
+    if not _have_systemctl() or not shutil.which("journalctl"):
+        return
+    try:
+        r = subprocess.run(
+            ["journalctl", "-u", service, "-n", str(n), "--no-pager", "-o", "short-iso"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        for line in r.stdout.splitlines():
+            yield line
+    except (subprocess.SubprocessError, OSError):
+        return
+
+
+@router.get("/api/logs/recent")
+def logs_recent(
+    request: Request,
+    service: str = "pendonn",
+    n: int = 100,
+    username: str = Depends(require_login),
+):
+    """Non-streaming snapshot for the initial page load."""
+    if service not in _ALLOWED_SERVICES:
+        raise HTTPException(status_code=400, detail="unknown service")
+    n = max(10, min(n, 500))
+    lines = list(_journalctl_lines(service, n))
+    if not lines:
+        # Fallback: read from db.system_logs (works on Windows dev too)
+        db = request.app.state.db
+        try:
+            db_logs = db.get_logs(limit=n)
+            lines = [
+                f"{l.get('timestamp', '?')} [{l.get('level', '?')}] "
+                f"{l.get('module', '?')}: {l.get('message', '')}"
+                for l in db_logs
+            ]
+        except Exception:
+            lines = ["(no logs available — daemon may not have run yet)"]
+    return {"service": service, "lines": lines}
+
+
+@router.get("/api/logs/stream")
+async def logs_stream(
+    request: Request,
+    service: str = "pendonn",
+    username: str = Depends(require_login),
+):
+    """Server-Sent Events stream of `journalctl -fu <service>`.
+
+    On non-Linux hosts (or when journalctl is missing) we send a single
+    "stream-unavailable" event then close — caller's EventSource will see
+    the connection end and stop reconnecting.
+    """
+    if service not in _ALLOWED_SERVICES:
+        raise HTTPException(status_code=400, detail="unknown service")
+
+    async def gen():
+        if not _have_systemctl() or not shutil.which("journalctl"):
+            yield (
+                "event: unavailable\n"
+                "data: log streaming requires systemd; running on "
+                f"{platform.system()}.\n\n"
+            )
+            return
+        proc = await asyncio.create_subprocess_exec(
+            "journalctl", "-fu", service, "--no-pager", "-o", "short-iso",
+            "-n", "0",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                line = await proc.stdout.readline()
+                if not line:
+                    # journalctl exited; tell the client and stop
+                    yield "event: closed\ndata: stream ended\n\n"
+                    break
+                # SSE framing: prefix every line with "data: "
+                text = line.decode("utf-8", errors="replace").rstrip()
+                yield f"data: {text}\n\n"
+        finally:
+            try:
+                proc.terminate()
+                await asyncio.wait_for(proc.wait(), timeout=2)
+            except (asyncio.TimeoutError, ProcessLookupError):
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+    })
+
+
+# ---------------------------------------------------------------------------
+# Database reset (heavily-confirmed destructive op)
+# ---------------------------------------------------------------------------
+
+# Tables that should survive a "reset" (currently none — every table is
+# operator data). Listed explicitly so future schema additions don't get
+# silently wiped without thought.
+_TABLES_TO_TRUNCATE = (
+    "vulnerabilities",   # FK → scans
+    "scans",             # FK → networks
+    "cracked_passwords", # FK → handshakes
+    "handshakes",        # FK → networks
+    "networks",
+    "system_logs",
+)
+
+
+@router.post("/danger/reset-database")
+def reset_database(
+    request: Request,
+    confirm_phrase: str = Form(""),
+    username: str = Depends(require_login),
+):
+    """Truncate every operator-data table. Two confirmations required:
+
+      1. Operator must explicitly POST here (UI gates it behind a modal).
+      2. confirm_phrase must equal "RESET" exactly.
+
+    A copy of the SQLite file is written to <db>.bak.<unixts> before any
+    deletes, so a misclick is recoverable from disk.
+
+    We TRUNCATE rather than rm-and-recreate because background threads
+    (FastAPI workers, the daemon if it's running) hold thread-local
+    sqlite3 connections that would silently break across an unlink. The
+    Database class doesn't have a "close everyone's handle" primitive
+    yet (audit P1 item still pending) — DELETE FROM avoids the issue.
+    """
+    if confirm_phrase != "RESET":
+        raise HTTPException(
+            status_code=400,
+            detail='confirm_phrase must equal "RESET" exactly',
+        )
+
+    db = request.app.state.db
+    db_path = request.app.state.config["database"]["path"]
+
+    # Best-effort backup. Use sqlite3's online backup API rather than
+    # shutil.copy so we get a transactionally-consistent snapshot even
+    # if other connections are mid-write.
+    backup_path = f"{db_path}.bak.{int(time.time())}"
+    try:
+        if os.path.isfile(db_path):
+            import sqlite3
+            src = sqlite3.connect(db_path)
+            try:
+                dst = sqlite3.connect(backup_path)
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
+            finally:
+                src.close()
+    except (OSError, sqlite3.Error) as e:
+        raise HTTPException(status_code=500, detail=f"backup failed: {e}")
+
+    # Truncate every operator-data table, in FK order so child rows go first.
+    try:
+        conn = db.connect()
+        cur = conn.cursor()
+        for tbl in _TABLES_TO_TRUNCATE:
+            cur.execute(f"DELETE FROM {tbl}")  # nosec — tbl is a literal allowlist
+            # Reset AUTOINCREMENT counter if sqlite_sequence row exists
+            cur.execute("DELETE FROM sqlite_sequence WHERE name = ?", (tbl,))
+        conn.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"truncate failed: {e}")
+
+    return {
+        "ok": True,
+        "backup": backup_path,
+        "tables_truncated": list(_TABLES_TO_TRUNCATE),
+        "ts": datetime.utcnow().isoformat() + "Z",
+    }

@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Logs — PenDonn{% endblock %}
+{% block page_title %}Logs{% endblock %}
+
+{% block content %}
+<div class="space-y-4" x-data="logsPage()" x-init="init()">
+    <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <div class="flex gap-1 bg-slate-100 dark:bg-ink-800 p-1 rounded-lg text-sm">
+            <button @click="setService('pendonn')"
+                    :class="service === 'pendonn' ? 'bg-white dark:bg-ink-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-600 dark:text-slate-300'"
+                    class="px-3 py-1 rounded transition">Daemon</button>
+            <button @click="setService('pendonn-web')"
+                    :class="service === 'pendonn-web' ? 'bg-white dark:bg-ink-700 text-slate-900 dark:text-white shadow-sm' : 'text-slate-600 dark:text-slate-300'"
+                    class="px-3 py-1 rounded transition">Web</button>
+        </div>
+        <div class="flex items-center gap-3 text-xs">
+            <label class="inline-flex items-center gap-2 text-slate-600 dark:text-slate-400">
+                <input type="checkbox" x-model="follow" class="rounded border-slate-300 dark:border-ink-600 dark:bg-ink-800 text-accent-deep focus:ring-accent-deep">
+                Follow tail
+            </label>
+            <button @click="clearBuffer()" class="px-2 py-1 rounded bg-slate-100 dark:bg-ink-800 hover:bg-slate-200 dark:hover:bg-ink-700 text-slate-600 dark:text-slate-300">Clear</button>
+            <span class="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                <span :class="streamState === 'open' ? 'bg-ok' : streamState === 'unavailable' ? 'bg-warn' : 'bg-rose-500'"
+                      class="w-1.5 h-1.5 rounded-full" :style="streamState === 'open' ? 'animation: pulse 2s infinite' : ''"></span>
+                <span x-text="streamLabel"></span>
+            </span>
+        </div>
+    </div>
+
+    {% if not have_systemctl %}
+    <div class="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-md px-3 py-2 flex items-center gap-2">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v3.75m0 3.75h.008v.008H12V16.5zM2.697 19.5h18.606c1.54 0 2.502-1.667 1.732-3L13.732 4.5c-.77-1.333-2.694-1.333-3.464 0L.965 16.5c-.77 1.333.192 3 1.732 3z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>systemd is not available on this host — falling back to recent rows from <code class="font-mono">system_logs</code>. Streaming is disabled.</span>
+    </div>
+    {% endif %}
+
+    <div class="bg-ink-950 text-slate-100 rounded-xl border border-slate-200 dark:border-ink-700 overflow-hidden font-mono text-xs">
+        <div class="px-4 py-2 bg-ink-900 border-b border-ink-700 text-slate-400 flex items-center justify-between">
+            <span x-text="`${service} · ${lines.length} lines`"></span>
+            <span class="text-[10px] uppercase tracking-wider">stdout</span>
+        </div>
+        <div x-ref="scroller" class="overflow-auto p-3" style="max-height: 70vh; min-height: 24rem">
+            <template x-for="(line, idx) in lines" :key="idx">
+                <div class="whitespace-pre-wrap break-all leading-relaxed" x-text="line"></div>
+            </template>
+            <div x-show="lines.length === 0" class="text-slate-500 italic">no lines yet</div>
+        </div>
+    </div>
+
+    <!-- Section: service control -->
+    <div id="services" hx-get="/partials/services" hx-trigger="load, every 10s" hx-swap="innerHTML">
+        <div class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl px-5 py-3 text-sm text-slate-500 dark:text-slate-400">Loading services…</div>
+    </div>
+
+    <!-- Section: danger zone -->
+    <div class="bg-white dark:bg-ink-900 border border-rose-200 dark:border-rose-900/50 rounded-xl">
+        <header class="px-5 py-3 border-b border-rose-200 dark:border-rose-900/50">
+            <h2 class="font-semibold text-rose-700 dark:text-rose-400">Danger zone</h2>
+        </header>
+        <div class="p-5 space-y-4 text-sm">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <div class="font-medium">Reset database</div>
+                    <p class="text-slate-500 dark:text-slate-400 mt-1">
+                        Wipes networks, handshakes, cracked passwords, scans, and vulnerabilities.
+                        A timestamped backup is written to the data directory before truncation.
+                    </p>
+                </div>
+                <button @click="$dispatch('open-reset-modal')"
+                        class="shrink-0 px-3 py-1.5 rounded-md bg-rose-600 text-white text-sm font-medium hover:bg-rose-700">
+                    Reset database
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset modal (Alpine) -->
+    <div x-data="{ open: false, phrase: '', busy: false, error: '', success: '' }"
+         @open-reset-modal.window="open = true; phrase = ''; error = ''; success = ''"
+         x-show="open"
+         @keydown.escape.window="open = false"
+         x-cloak
+         class="fixed inset-0 z-50 grid place-items-center bg-black/50">
+        <div @click.outside="if (!busy) open = false" class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl shadow-2xl w-full max-w-md mx-4">
+            <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
+                <h3 class="font-semibold text-rose-600 dark:text-rose-400">Confirm database reset</h3>
+            </header>
+            <div class="p-5 space-y-3">
+                <p class="text-sm text-slate-600 dark:text-slate-300">
+                    Type <code class="font-mono font-bold">RESET</code> below to confirm. A backup will be saved alongside the database.
+                </p>
+                <input x-model="phrase" type="text" placeholder="RESET"
+                       class="w-full rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-rose-500 focus:ring-rose-500 font-mono"
+                       autocomplete="off" spellcheck="false">
+                <div x-show="error" x-text="error" class="text-sm text-rose-600 dark:text-rose-400"></div>
+                <div x-show="success" x-text="success" class="text-sm text-emerald-700 dark:text-emerald-400"></div>
+            </div>
+            <footer class="px-5 py-3 border-t border-slate-200 dark:border-ink-700 flex justify-end gap-2">
+                <button @click="open = false" :disabled="busy"
+                        class="px-3 py-1.5 rounded text-sm bg-slate-100 dark:bg-ink-800 hover:bg-slate-200 dark:hover:bg-ink-700">Cancel</button>
+                <button @click="async () => {
+                            busy = true; error = ''; success = '';
+                            try {
+                                const fd = new FormData();
+                                fd.append('confirm_phrase', phrase);
+                                const r = await fetch('/danger/reset-database', { method: 'POST', body: fd });
+                                if (r.ok) {
+                                    const j = await r.json();
+                                    success = `Database reset. Backup at ${j.backup}.`;
+                                    setTimeout(() => { open = false; window.location.reload() }, 1500);
+                                } else {
+                                    const j = await r.json().catch(() => ({}));
+                                    error = j.detail || `HTTP ${r.status}`;
+                                }
+                            } catch (e) { error = String(e) }
+                            finally { busy = false }
+                        }"
+                        :disabled="busy || phrase !== 'RESET'"
+                        :class="phrase === 'RESET' && !busy ? 'bg-rose-600 hover:bg-rose-700' : 'bg-rose-300 dark:bg-rose-900/50 cursor-not-allowed'"
+                        class="px-3 py-1.5 rounded text-sm text-white">
+                    <span x-show="!busy">Reset database</span>
+                    <span x-show="busy">Resetting…</span>
+                </button>
+            </footer>
+        </div>
+    </div>
+</div>
+
+<script>
+function logsPage() {
+    return {
+        service: 'pendonn',
+        follow: true,
+        lines: [],
+        es: null,
+        streamState: 'init',
+        streamLabel: 'connecting…',
+
+        async init() {
+            await this.loadRecent();
+            this.openStream();
+        },
+
+        async setService(s) {
+            this.service = s;
+            this.lines = [];
+            await this.loadRecent();
+            this.openStream();
+        },
+
+        clearBuffer() { this.lines = [] },
+
+        async loadRecent() {
+            try {
+                const r = await fetch(`/api/logs/recent?service=${this.service}&n=200`);
+                if (r.ok) {
+                    const j = await r.json();
+                    this.lines = j.lines || [];
+                    this.scrollToBottom();
+                }
+            } catch (e) { /* keep going to streaming attempt */ }
+        },
+
+        openStream() {
+            if (this.es) { this.es.close(); this.es = null }
+            const es = new EventSource(`/api/logs/stream?service=${this.service}`);
+            this.es = es;
+            this.streamState = 'connecting';
+            this.streamLabel = 'connecting…';
+            es.onopen = () => { this.streamState = 'open'; this.streamLabel = 'live' };
+            es.onmessage = (ev) => {
+                this.lines.push(ev.data);
+                if (this.lines.length > 2000) this.lines = this.lines.slice(-1500);
+                if (this.follow) this.scrollToBottom();
+            };
+            es.addEventListener('unavailable', (ev) => {
+                this.streamState = 'unavailable';
+                this.streamLabel = 'streaming N/A on this host';
+                es.close();
+            });
+            es.addEventListener('closed', () => {
+                this.streamState = 'closed';
+                this.streamLabel = 'stream closed';
+            });
+            es.onerror = () => {
+                if (this.streamState === 'unavailable') return;
+                this.streamState = 'reconnecting';
+                this.streamLabel = 'reconnecting…';
+                // EventSource auto-reconnects; we just update the label.
+            };
+        },
+
+        scrollToBottom() {
+            this.$nextTick(() => {
+                if (this.$refs.scroller) this.$refs.scroller.scrollTop = this.$refs.scroller.scrollHeight;
+            });
+        },
+    }
+}
+</script>
+{% endblock %}

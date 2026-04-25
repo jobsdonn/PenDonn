@@ -424,5 +424,119 @@ class TestScansAndVulnsPages(unittest.TestCase):
         self.assertNotIn("Anonymous SMB share", r.text)
 
 
+@unittest.skipUnless(HAVE_FASTAPI, "fastapi not installed")
+class TestSystemPage(unittest.TestCase):
+    """Logs + service control + database reset."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.app, cls.config_path, cls.db_path = _build_app_fixture(cls.tmp.name)
+        # Seed a few system_logs rows so the recent endpoint has fallback data
+        db = cls.app.state.db
+        db.add_log("test", "boot complete", "INFO")
+        db.add_log("test", "dummy warning", "WARNING")
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.app.state.db.close_all()
+        except Exception:
+            pass
+        try:
+            cls.tmp.cleanup()
+        except (PermissionError, OSError):
+            pass
+
+    def setUp(self):
+        self.client = TestClient(self.app)
+        self.client.post(
+            "/login",
+            data={"username": "tester", "password": "hunter2-correct-horse", "next": "/"},
+            follow_redirects=False,
+        )
+
+    def test_logs_page_renders(self):
+        r = self.client.get("/logs")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Logs", r.text)
+        # Service tabs present
+        self.assertIn("Daemon", r.text)
+        self.assertIn("Web", r.text)
+        # Danger zone visible
+        self.assertIn("Reset database", r.text)
+
+    def test_logs_recent_falls_back_to_system_logs_on_non_linux(self):
+        # On Windows dev box, journalctl is missing → falls back to db.get_logs.
+        r = self.client.get("/api/logs/recent?service=pendonn&n=20")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["service"], "pendonn")
+        self.assertIsInstance(body["lines"], list)
+        # Our seeded rows should appear
+        joined = "\n".join(body["lines"])
+        self.assertIn("boot complete", joined)
+
+    def test_logs_recent_rejects_unknown_service(self):
+        r = self.client.get("/api/logs/recent?service=evil")
+        self.assertEqual(r.status_code, 400)
+
+    def test_services_partial_renders(self):
+        r = self.client.get("/partials/services")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("pendonn.service", r.text)
+        self.assertIn("pendonn-web.service", r.text)
+        # On non-Linux, the "systemctl unavailable" hint shows
+        if not __import__("platform").system() == "Linux":
+            self.assertIn("unavailable", r.text)
+
+    def test_service_action_no_systemctl_returns_friendly_message(self):
+        # On Windows: action is refused with a friendly partial render
+        r = self.client.post("/services/pendonn/restart")
+        self.assertEqual(r.status_code, 200)
+        # Either the platform-unavailable message rendered, or systemctl
+        # ran and we got a real status — both are valid; just check we
+        # got the partial back.
+        self.assertIn("pendonn.service", r.text)
+
+    def test_service_action_rejects_bad_service(self):
+        r = self.client.post("/services/evil/start")
+        self.assertEqual(r.status_code, 400)
+
+    def test_service_action_rejects_bad_action(self):
+        r = self.client.post("/services/pendonn/launch")
+        self.assertEqual(r.status_code, 400)
+
+    def test_reset_database_requires_phrase(self):
+        r = self.client.post("/danger/reset-database", data={"confirm_phrase": "no"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("RESET", r.json()["detail"])
+
+    def test_reset_database_with_correct_phrase_truncates_and_backs_up(self):
+        db = self.app.state.db
+        db.add_network("WillBeGone", "AA:BB:CC:00:00:01", 6, "WPA2", -50)
+        self.assertEqual(len(db.get_networks()), 1)
+
+        r = self.client.post("/danger/reset-database",
+                             data={"confirm_phrase": "RESET"})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertTrue(body["ok"])
+        self.assertIn(".bak.", body["backup"])
+        self.assertTrue(os.path.isfile(body["backup"]))
+        self.assertIn("networks", body["tables_truncated"])
+
+        # Backup contains the row that was wiped from the live DB
+        import sqlite3
+        b = sqlite3.connect(body["backup"])
+        try:
+            cnt = b.execute("SELECT COUNT(*) FROM networks").fetchone()[0]
+            self.assertEqual(cnt, 1)
+        finally:
+            b.close()
+        # Live DB is empty
+        self.assertEqual(len(db.get_networks()), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
