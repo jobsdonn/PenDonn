@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Scans — PenDonn{% endblock %}
+{% block page_title %}Network scans{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+    <div class="flex items-center justify-end">
+        <span hx-get="/partials/scans"
+              hx-target="#scans-table"
+              hx-swap="outerHTML"
+              hx-trigger="every 10s"
+              class="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+            <span class="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
+            Live (10s)
+        </span>
+    </div>
+
+    {% include "partials/scans_table.html" %}
+</div>
+{% endblock %}

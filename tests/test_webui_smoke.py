@@ -334,5 +334,95 @@ class TestHandshakesAndPasswordsPages(unittest.TestCase):
         self.assertIn("42s", r.text)
 
 
+@unittest.skipUnless(HAVE_FASTAPI, "fastapi not installed")
+class TestScansAndVulnsPages(unittest.TestCase):
+    """Scans and vulnerabilities pages."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.app, cls.config_path, cls.db_path = _build_app_fixture(cls.tmp.name)
+        db = cls.app.state.db
+        net_id = db.add_network("Lab1", "AA:BB:CC:DD:EE:01", 6, "WPA2", -50)
+        cls.scan_id = db.add_scan(net_id, "Lab1", "full")
+        import json as _json
+        db.update_scan(cls.scan_id, "completed",
+                       {"hosts": [
+                           {"ip": "10.0.0.1", "hostname": "router.lab", "ports": [
+                               {"port": 22, "service": "ssh"},
+                               {"port": 80, "service": "http"},
+                           ]},
+                           {"ip": "10.0.0.5", "ports": [{"port": 445, "service": "smb"}]},
+                       ]}, 3)
+        db.add_vulnerability(cls.scan_id, "10.0.0.1", 22, "ssh",
+                             "Weak SSH algorithms", "high",
+                             "ssh-rsa accepted", "ssh_scanner")
+        db.add_vulnerability(cls.scan_id, "10.0.0.1", 80, "http",
+                             "Default credentials", "critical",
+                             "admin/admin works", "router_scanner")
+        db.add_vulnerability(cls.scan_id, "10.0.0.5", 445, "smb",
+                             "Anonymous SMB share", "medium",
+                             "IPC$ readable", "smb_scanner")
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.app.state.db.close_all()
+        except Exception:
+            pass
+        try:
+            cls.tmp.cleanup()
+        except (PermissionError, OSError):
+            pass
+
+    def setUp(self):
+        self.client = TestClient(self.app)
+        self.client.post(
+            "/login",
+            data={"username": "tester", "password": "hunter2-correct-horse", "next": "/"},
+            follow_redirects=False,
+        )
+
+    def test_scans_page_renders(self):
+        r = self.client.get("/scans")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Lab1", r.text)
+        self.assertIn("completed", r.text)
+        self.assertIn("3 vulns", r.text)
+
+    def test_scan_detail_endpoint(self):
+        r = self.client.get(f"/scans/{self.scan_id}")
+        self.assertEqual(r.status_code, 200)
+        # Hosts + ports listed
+        self.assertIn("10.0.0.1", r.text)
+        self.assertIn("router.lab", r.text)
+        self.assertIn("ssh", r.text)
+        # Vulns embedded too
+        self.assertIn("Weak SSH algorithms", r.text)
+        self.assertIn("Default credentials", r.text)
+
+    def test_scan_detail_404_for_unknown(self):
+        r = self.client.get("/scans/99999")
+        self.assertEqual(r.status_code, 404)
+
+    def test_vulnerabilities_page_groups_by_severity(self):
+        r = self.client.get("/vulnerabilities")
+        self.assertEqual(r.status_code, 200)
+        # All three vulns visible
+        self.assertIn("Weak SSH algorithms", r.text)
+        self.assertIn("Default credentials", r.text)
+        self.assertIn("Anonymous SMB share", r.text)
+        # KPI tile counts (1 critical, 1 high, 1 medium, 0 low)
+        self.assertIn("Critical", r.text)
+        self.assertIn("High", r.text)
+
+    def test_vulnerabilities_filter_by_severity(self):
+        r = self.client.get("/partials/vulnerabilities?severity=critical")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Default credentials", r.text)
+        self.assertNotIn("Weak SSH algorithms", r.text)
+        self.assertNotIn("Anonymous SMB share", r.text)
+
+
 if __name__ == "__main__":
     unittest.main()

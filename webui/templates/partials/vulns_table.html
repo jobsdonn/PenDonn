@@ -1,0 +1,51 @@
+<div id="vulns-table" class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl overflow-hidden">
+{% if vulns %}
+<div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+        <thead class="bg-slate-50 dark:bg-ink-800/60 text-left text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <tr>
+                <th class="px-4 py-3 font-medium w-20">Severity</th>
+                <th class="px-4 py-3 font-medium">Vulnerability</th>
+                <th class="px-4 py-3 font-medium">Target</th>
+                <th class="px-4 py-3 font-medium">Plugin</th>
+                <th class="px-4 py-3 font-medium">Found</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200 dark:divide-ink-700">
+            {% for v in vulns %}
+            {% set sev = (v.severity or 'info')|lower %}
+            <tr class="hover:bg-slate-50 dark:hover:bg-ink-800/40 transition">
+                <td class="px-4 py-2.5">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
+                        {% if sev == 'critical' %}bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300
+                        {% elif sev == 'high' %}bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300
+                        {% elif sev == 'medium' %}bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300
+                        {% elif sev == 'low' %}bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300
+                        {% else %}bg-slate-100 text-slate-600 dark:bg-ink-800 dark:text-slate-300{% endif %}">{{ sev }}</span>
+                </td>
+                <td class="px-4 py-2.5">
+                    <div class="font-medium">{{ v.vulnerability_type }}</div>
+                    {% if v.description %}<div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5 max-w-2xl">{{ v.description }}</div>{% endif %}
+                </td>
+                <td class="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-400">
+                    {{ v.host }}{% if v.port %}:{{ v.port }}{% endif %}
+                    {% if v.service %}<div class="text-slate-400 dark:text-slate-500">{{ v.service }}</div>{% endif %}
+                </td>
+                <td class="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400">{{ v.plugin_name or '—' }}</td>
+                <td class="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 tabular-nums">{{ v.discovered_date|string if v.discovered_date else '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<div class="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-ink-700">
+    {{ vulns|length }} finding{{ 's' if vulns|length != 1 }}
+</div>
+{% else %}
+<div class="px-6 py-16 text-center">
+    <svg class="w-10 h-10 mx-auto text-slate-300 dark:text-ink-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12l2 2 4-4M12 21a9 9 0 110-18 9 9 0 010 18z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <h3 class="mt-3 font-medium">{% if severity != 'all' %}No {{ severity }}-severity findings{% else %}No vulnerabilities found yet{% endif %}</h3>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Plugins write here as they discover issues.</p>
+</div>
+{% endif %}
+</div>

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Vulnerabilities — PenDonn{% endblock %}
+{% block page_title %}Vulnerabilities{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+    {# Severity tiles double as filter chips #}
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {% set sevs = [
+            ('all',      'All',      grouped.values()|sum, 'slate'),
+            ('critical', 'Critical', grouped.critical,     'red'),
+            ('high',     'High',     grouped.high,         'rose'),
+            ('medium',   'Medium',   grouped.medium,       'amber'),
+            ('low',      'Low',      grouped.low,          'sky'),
+        ] %}
+        {% for key, label, count, hue in sevs %}
+        <a hx-get="/partials/vulnerabilities?severity={{ key }}"
+           hx-target="#vulns-table"
+           hx-swap="outerHTML"
+           href="/vulnerabilities?severity={{ key }}"
+           class="group bg-white dark:bg-ink-900 border rounded-lg px-4 py-3 transition flex items-center justify-between
+                  {% if severity == key %}border-accent-deep ring-2 ring-accent-deep/20{% else %}border-slate-200 dark:border-ink-700 hover:border-slate-300 dark:hover:border-ink-600{% endif %}">
+            <div>
+                <div class="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">{{ label }}</div>
+                <div class="text-2xl font-semibold tracking-tight tabular-nums mt-0.5">{{ count }}</div>
+            </div>
+            <span class="w-2.5 h-2.5 rounded-full
+                {% if hue == 'red' %}bg-red-500
+                {% elif hue == 'rose' %}bg-rose-500
+                {% elif hue == 'amber' %}bg-amber-500
+                {% elif hue == 'sky' %}bg-sky-500
+                {% else %}bg-slate-300 dark:bg-ink-600{% endif %}"></span>
+        </a>
+        {% endfor %}
+    </div>
+
+    {% include "partials/vulns_table.html" %}
+</div>
+{% endblock %}
