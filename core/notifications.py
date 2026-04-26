@@ -115,6 +115,17 @@ class _Backend(abc.ABC):
                     self._deliver(event)
                     last_err = None
                     break
+                except urllib.error.HTTPError as e:
+                    # 4xx/5xx from the server — don't retry, log body for debugging
+                    body = ""
+                    try:
+                        body = e.read().decode("utf-8", errors="replace")[:300]
+                    except Exception:
+                        pass
+                    logger.warning(
+                        f"{self.name} HTTP {e.code} {e.reason}: {body}"
+                    )
+                    break
                 except urllib.error.URLError as e:
                     last_err = e
                     if attempt <= len(self._RETRY_DELAYS):

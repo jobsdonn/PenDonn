@@ -7,14 +7,14 @@
    Writes to config.json.local; daemon picks up changes on next restart. #}
 
 <div id="cracking-settings"
-     x-data="{
+     x-data='{
         engines: {{ cracking_engines | tojson }},
         move(i, dir) {
             let j = i + dir;
             if (j < 0 || j >= this.engines.length) return;
             [this.engines[i], this.engines[j]] = [this.engines[j], this.engines[i]];
         }
-     }"
+     }'
      class="space-y-5">
 
     {% if saved %}

@@ -43,6 +43,7 @@ WorkingDirectory=${INSTALL_DIR}
 ExecStart=${INSTALL_DIR}/venv/bin/uvicorn webui.app:app --host 0.0.0.0 --port 8081
 Restart=always
 RestartSec=5
+TimeoutStopSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=pendonn-webui
