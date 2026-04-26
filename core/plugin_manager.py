@@ -78,15 +78,15 @@ def _check_plugin_file_safety(path: str) -> Optional[str]:
 class PluginBase(ABC):
     """Base class for all PenDonn plugins"""
     
-    def __init__(self, config: Dict, *args, **kwargs):
+    def __init__(self, config: Dict, database=None, *args, **kwargs):
         """Initialize plugin with configuration"""
         self.config = config
+        self.db = database
         self.name = config.get('name', 'Unknown Plugin')
         self.version = config.get('version', '1.0.0')
         self.description = config.get('description', '')
         self.author = config.get('author', '')
         self.enabled = config.get('enabled', True)
-        # Additional arguments can be handled here if needed
         self.extra_args = args
         self.extra_kwargs = kwargs
     
