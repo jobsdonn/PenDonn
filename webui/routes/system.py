@@ -414,22 +414,43 @@ def reset_database(
     except (OSError, sqlite3.Error) as e:
         raise HTTPException(status_code=500, detail=f"backup failed: {e}")
 
-    # Truncate every operator-data table, in FK order so child rows go first.
-    # Open a fresh connection with a long busy_timeout so we wait out any
-    # concurrent daemon writes rather than immediately raising "database is locked".
+    # Stop the daemon so it releases all write locks, then truncate, then restart.
+    # Without stopping, the daemon's thread-local connections hold open transactions
+    # that block writes indefinitely even with WAL mode + busy_timeout.
+    import subprocess as _sub
+    import sqlite3 as _sqlite3
+
+    # On Linux with systemd: stop daemon to release write locks, truncate, restart.
+    # On other platforms (dev/Windows): fall back to busy_timeout only.
+    have_systemctl = _have_systemctl()
+    daemon_was_running = False
+    if have_systemctl:
+        try:
+            r = _sub.run(["systemctl", "is-active", "pendonn"],
+                         capture_output=True, text=True)
+            daemon_was_running = r.returncode == 0
+            if daemon_was_running:
+                _sub.run(["systemctl", "stop", "pendonn"], timeout=15, check=True)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"could not stop daemon: {e}")
+
     try:
-        import sqlite3 as _sqlite3
-        reset_conn = _sqlite3.connect(db_path, timeout=30)
+        reset_conn = _sqlite3.connect(db_path, timeout=30, isolation_level=None)
         reset_conn.execute("PRAGMA journal_mode=WAL")
         reset_conn.execute("PRAGMA busy_timeout=30000")
-        cur = reset_conn.cursor()
+        reset_conn.execute("BEGIN EXCLUSIVE")
         for tbl in _TABLES_TO_TRUNCATE:
-            cur.execute(f"DELETE FROM {tbl}")  # nosec — tbl is a literal allowlist
-            cur.execute("DELETE FROM sqlite_sequence WHERE name = ?", (tbl,))
-        reset_conn.commit()
+            reset_conn.execute(f"DELETE FROM {tbl}")  # nosec — tbl is a literal allowlist
+            reset_conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (tbl,))
+        reset_conn.execute("COMMIT")
         reset_conn.close()
     except Exception as e:
+        if daemon_was_running:
+            _sub.run(["systemctl", "start", "pendonn"], timeout=10)
         raise HTTPException(status_code=500, detail=f"truncate failed: {e}")
+
+    if daemon_was_running:
+        _sub.run(["systemctl", "start", "pendonn"], timeout=10)
 
     return {
         "ok": True,
