@@ -51,7 +51,8 @@ class NetworkEnumerator:
         
         self.enabled = config['enumeration']['enabled']
         self.auto_scan = config['enumeration']['auto_scan_on_crack']
-        self.nmap_timing = config['enumeration']['nmap_timing']
+        timing = config['enumeration']['nmap_timing']
+        self.nmap_timing = timing if timing.startswith('-') else f'-{timing}'
         self.port_range = config['enumeration']['port_scan_range']
         self.scan_timeout = config['enumeration']['scan_timeout']
         

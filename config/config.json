@@ -43,7 +43,7 @@
   "enumeration": {
     "enabled": true,
     "auto_scan_on_crack": true,
-    "nmap_timing": "T4",
+    "nmap_timing": "-T4",
     "port_scan_range": "1-10000",
     "scan_timeout": 3600
   },
