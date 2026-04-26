@@ -75,16 +75,16 @@ class VPNCredStealer(PluginBase):
             if vpn_files:
                 self.log_warning(f"Found {len(vpn_files)} VPN configuration files on {host}")
                 
-                files_list = '\\n'.join(vpn_files[:10])
+                files_list = '\n'.join(vpn_files[:10])
                 if len(vpn_files) > 10:
-                    files_list += f'\\n... and {len(vpn_files) - 10} more'
-                
+                    files_list += f'\n... and {len(vpn_files) - 10} more'
+
                 # Extract credentials if possible
                 creds = self._extract_vpn_credentials(host, vpn_files)
-                
-                desc = f'Found {len(vpn_files)} VPN configuration files:\\n{files_list}'
+
+                desc = f'Found {len(vpn_files)} VPN configuration files:\n{files_list}'
                 if creds:
-                    desc += f'\\n\\nExtracted credentials:\\n' + '\\n'.join(creds[:5])
+                    desc += f'\n\nExtracted credentials:\n' + '\n'.join(creds[:5])
                 
                 self.db.add_vulnerability(
                     scan_id=scan_id,
@@ -152,7 +152,7 @@ class VPNCredStealer(PluginBase):
             
             # Get share list
             shares = []
-            for line in result.stdout.split('\\n'):
+            for line in result.stdout.split('\n'):
                 if 'Disk' in line:
                     parts = line.split()
                     if len(parts) >= 1:
@@ -171,7 +171,7 @@ class VPNCredStealer(PluginBase):
                         timeout=60
                     )
                     
-                    for line in result.stdout.split('\\n'):
+                    for line in result.stdout.split('\n'):
                         for pattern in self.VPN_PATTERNS:
                             if re.search(pattern, line, re.IGNORECASE):
                                 parts = line.split()

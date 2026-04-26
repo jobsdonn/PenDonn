@@ -61,7 +61,7 @@ class SNMPScanner(PluginBase):
                     
                     desc = f'SNMP accessible with community string: {community}'
                     if sys_info:
-                        desc += f'\\n\\nSystem Information:\\n{sys_info}'
+                        desc += f'\n\nSystem Information:\n{sys_info}'
                     
                     severity = 'critical' if community in ['public', 'private'] else 'high'
                     
@@ -135,7 +135,7 @@ class SNMPScanner(PluginBase):
                 except:
                     continue
             
-            return '\\n'.join(info) if info else None
+            return '\n'.join(info) if info else None
         except Exception as e:
             self.log_debug(f"SNMP info gathering error: {e}")
             return None

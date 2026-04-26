@@ -17,12 +17,12 @@ class UPnPScanner(PluginBase):
     """UPnP vulnerability scanner"""
     
     SSDP_DISCOVER = (
-        'M-SEARCH * HTTP/1.1\\r\\n'
-        'HOST: 239.255.255.250:1900\\r\\n'
-        'MAN: "ssdp:discover"\\r\\n'
-        'MX: 2\\r\\n'
-        'ST: upnp:rootdevice\\r\\n'
-        '\\r\\n'
+        'M-SEARCH * HTTP/1.1\r\n'
+        'HOST: 239.255.255.250:1900\r\n'
+        'MAN: "ssdp:discover"\r\n'
+        'MX: 2\r\n'
+        'ST: upnp:rootdevice\r\n'
+        '\r\n'
     )
     
     def run(self, scan_id: int, hosts: List[str], scan_results: List[Dict]) -> Dict:
@@ -81,7 +81,7 @@ class UPnPScanner(PluginBase):
                     
                     # Parse response
                     device = {}
-                    for line in response.split('\\r\\n'):
+                    for line in response.split('\r\n'):
                         if ':' in line:
                             key, value = line.split(':', 1)
                             device[key.strip().lower()] = value.strip()

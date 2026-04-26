@@ -108,14 +108,19 @@ class PluginBase(ABC):
     def log_info(self, message: str):
         """Log info message"""
         logger.info(f"[{self.name}] {message}")
-    
+
     def log_warning(self, message: str):
         """Log warning message"""
         logger.warning(f"[{self.name}] {message}")
-    
+
     def log_error(self, message: str):
         """Log error message"""
         logger.error(f"[{self.name}] {message}")
+
+    def log_debug(self, message: str):
+        """Log debug message. Many plugins call this; previously raised
+        AttributeError on every error path because it didn't exist."""
+        logger.debug(f"[{self.name}] {message}")
 
 
 class PluginManager:
@@ -186,12 +191,29 @@ class PluginManager:
                 logger.info(f"Plugin {plugin_config.get('name', 'unknown')} is disabled")
                 return
             
-            # Load plugin module
-            module_file = plugin_config.get('module', 'plugin.py')
-            module_path = os.path.join(plugin_path, module_file)
-            
-            if not os.path.exists(module_path):
-                logger.error(f"Plugin module not found: {module_path}")
+            # Load plugin module. Manifest may omit `module`; fall back to
+            # `<dirname>.py` (matches the convention every shipped plugin
+            # actually uses) and finally `plugin.py` for any new plugin
+            # that wants the canonical name.
+            dir_name = os.path.basename(plugin_path)
+            module_candidates = []
+            if plugin_config.get('module'):
+                module_candidates.append(plugin_config['module'])
+            else:
+                module_candidates.extend([f"{dir_name}.py", "plugin.py"])
+
+            module_path = None
+            for candidate in module_candidates:
+                candidate_path = os.path.join(plugin_path, candidate)
+                if os.path.exists(candidate_path):
+                    module_path = candidate_path
+                    break
+
+            if not module_path:
+                logger.error(
+                    f"Plugin module not found in {plugin_path} "
+                    f"(tried: {', '.join(module_candidates)})"
+                )
                 return
 
             # SECURITY: refuse to exec plugin code we can't trust the
@@ -227,15 +249,36 @@ class PluginManager:
             
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            
-            # Get plugin class
-            plugin_class_name = plugin_config.get('class', 'Plugin')
-            
-            if not hasattr(module, plugin_class_name):
-                logger.error(f"Plugin class '{plugin_class_name}' not found in {module_path}")
-                return
-            
-            plugin_class = getattr(module, plugin_class_name)
+
+            # Locate the plugin class. Manifest may declare `class` explicitly;
+            # otherwise scan the loaded module for a subclass of PluginBase.
+            # This means new plugins don't need to set `class` in plugin.json.
+            explicit_class_name = plugin_config.get('class')
+            plugin_class = None
+            if explicit_class_name:
+                plugin_class = getattr(module, explicit_class_name, None)
+                if plugin_class is None:
+                    logger.error(
+                        f"Plugin class '{explicit_class_name}' not found in {module_path}"
+                    )
+                    return
+            else:
+                for attr_name in dir(module):
+                    candidate = getattr(module, attr_name)
+                    if (isinstance(candidate, type)
+                            and issubclass(candidate, PluginBase)
+                            and candidate is not PluginBase):
+                        plugin_class = candidate
+                        logger.debug(
+                            f"Auto-detected plugin class {attr_name} in {module_path}"
+                        )
+                        break
+                if plugin_class is None:
+                    logger.error(
+                        f"No PluginBase subclass found in {module_path}; "
+                        f"declare `class` in plugin.json or extend PluginBase"
+                    )
+                    return
             
             # Instantiate plugin
             try:

@@ -86,9 +86,9 @@ class SMBCredStealer(PluginBase):
                 if interesting_files:
                     self.log_warning(f"Found {len(interesting_files)} sensitive files on \\\\{host}\\{share_name}")
                     
-                    files_list = '\\n'.join(interesting_files[:10])  # Limit to first 10
+                    files_list = '\n'.join(interesting_files[:10])  # Limit to first 10
                     if len(interesting_files) > 10:
-                        files_list += f'\\n... and {len(interesting_files) - 10} more'
+                        files_list += f'\n... and {len(interesting_files) - 10} more'
                     
                     self.db.add_vulnerability(
                         scan_id=scan_id,
@@ -97,7 +97,7 @@ class SMBCredStealer(PluginBase):
                         service='smb',
                         vuln_type='Sensitive Files on SMB Share',
                         severity='high',
-                        description=f'Found {len(interesting_files)} sensitive files on share {share_name}:\\n{files_list}',
+                        description=f'Found {len(interesting_files)} sensitive files on share {share_name}:\n{files_list}',
                         plugin_name=self.name
                     )
                     vulnerabilities_found += 1
@@ -122,7 +122,7 @@ class SMBCredStealer(PluginBase):
             )
             
             shares = []
-            for line in result.stdout.split('\\n'):
+            for line in result.stdout.split('\n'):
                 if 'Disk' in line or 'IPC' in line:
                     parts = line.split()
                     if len(parts) >= 1:
@@ -145,7 +145,7 @@ class SMBCredStealer(PluginBase):
             )
             
             interesting = []
-            for line in result.stdout.split('\\n'):
+            for line in result.stdout.split('\n'):
                 # Parse file listings
                 if not line.strip() or 'blocks available' in line or 'blocks of size' in line:
                     continue
