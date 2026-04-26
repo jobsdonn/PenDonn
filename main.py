@@ -18,6 +18,7 @@ from core.plugin_manager import PluginManager
 from core.enumerator import NetworkEnumerator
 from core.cracker import PasswordCracker
 from core.interface_manager import resolve_interfaces
+from core.notifications import Notifier
 from core.safety import preflight_check, SafetyConfig
 
 # Configure logging with unbuffered output to prevent log stalling
@@ -85,22 +86,27 @@ class PenDonn:
         # Initialize database
         logger.info("Initializing database...")
         self.db = Database(self.config['database']['path'])
-        
+
+        # Initialize notifier (fire-and-forget ntfy push notifications).
+        # No-op if disabled in config — modules call into it unconditionally.
+        logger.info("Initializing notifier...")
+        self.notifier = Notifier(self.config)
+
         # Initialize plugin manager
         logger.info("Initializing plugin manager...")
         self.plugin_manager = PluginManager(self.config, self.db)
         self.plugin_manager.load_plugins()
-        
+
         # Initialize WiFi scanner
         logger.info("Initializing WiFi scanner...")
         from core.wifi_scanner import WiFiScanner
-        self.wifi_scanner = WiFiScanner(self.config, self.db)
-        
+        self.wifi_scanner = WiFiScanner(self.config, self.db, notifier=self.notifier)
+
         logger.info("Initializing password cracker...")
-        self.cracker = PasswordCracker(self.config, self.db, self.wifi_scanner)
-        
+        self.cracker = PasswordCracker(self.config, self.db, self.wifi_scanner, notifier=self.notifier)
+
         logger.info("Initializing network enumerator...")
-        self.enumerator = NetworkEnumerator(self.config, self.db, self.plugin_manager, self.wifi_scanner)
+        self.enumerator = NetworkEnumerator(self.config, self.db, self.plugin_manager, self.wifi_scanner, notifier=self.notifier)
         
         # Initialize display (with protection against crashes)
         if self.config['display']['enabled']:
@@ -173,7 +179,10 @@ class PenDonn:
         
         if self.display:
             self.display.stop()
-        
+
+        if self.notifier:
+            self.notifier.stop()
+
         # Close database connections
         if self.db:
             self.db.close_all()

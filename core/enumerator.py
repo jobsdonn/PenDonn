@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class NetworkEnumerator:
     """Network enumeration and vulnerability scanning"""
     
-    def __init__(self, config: Dict, database, plugin_manager, wifi_scanner=None):
+    def __init__(self, config: Dict, database, plugin_manager, wifi_scanner=None, notifier=None):
         """Initialize network enumerator
         
         Args:
@@ -48,6 +48,7 @@ class NetworkEnumerator:
         self.db = database
         self.plugin_manager = plugin_manager
         self.wifi_scanner = wifi_scanner  # For coordinating interface usage
+        self.notifier = notifier
         
         self.enabled = config['enumeration']['enabled']
         self.auto_scan = config['enumeration']['auto_scan_on_crack']
@@ -269,6 +270,25 @@ class NetworkEnumerator:
             # Update scan with results
             self.db.update_scan(scan_id, 'completed', results, vulnerabilities_found)
             logger.info(f"✓ Enumeration completed for {ssid}. Found {vulnerabilities_found} vulnerabilities, {len(hosts)} hosts")
+
+            if self.notifier:
+                self.notifier.scan_completed(ssid, len(hosts), vulnerabilities_found)
+                # If anything critical/high turned up, fire a separate
+                # higher-priority notification so it pages even if scan
+                # notifications are muted.
+                try:
+                    for vuln in self.db.get_vulnerabilities(scan_id=scan_id):
+                        sev = (vuln.get('severity') or '').lower()
+                        if sev in ('critical', 'high'):
+                            self.notifier.vulnerability_found(
+                                ssid=ssid,
+                                host=vuln.get('host', '?'),
+                                severity=sev,
+                                vuln_type=vuln.get('vuln_type', 'unknown'),
+                                description=vuln.get('description', ''),
+                            )
+                except Exception as e:
+                    logger.debug(f"Could not enumerate vulns for notification: {e}")
             
             # Disconnect from network
             self._disconnect_from_network()

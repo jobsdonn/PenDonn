@@ -8,9 +8,10 @@ Headless WiFi pentest tool for Raspberry Pi, designed for **authorized internal 
 
 - **Continuous WiFi scan** (airodump-ng) across 2.4 GHz + 5 GHz, parsing APs by BSSID/ESSID/encryption/channel
 - **Targeted handshake capture**: only attacks SSIDs in `allowlist.ssids`, with both classic 4-way handshake (deauth + reassociation) and active PMKID retrieval (hcxdumptool, no client required)
-- **Cracking**: hashcat (`-m 22000`), aircrack-ng, and john the Ripper, in that priority
+- **Cracking**: cowpatty (`.pcapng` native, ARM-friendly), aircrack-ng, and john the Ripper, in that priority. Extra wordlists (test/probable/SecLists top-N) are tried before `rockyou.txt`.
 - **Post-crack enumeration**: connects to the cracked network and runs nmap + a plugin pipeline (HTTP, FTP, SSH, SMB, SNMP, mDNS, UPnP, …)
 - **Web UI** (FastAPI + HTMX, port 8081) for status, settings, log streaming, and manual control
+- **Push notifications** (optional, via [ntfy.sh](https://ntfy.sh)) — phone alerts when a handshake captures, a PSK cracks, or a critical vuln surfaces
 - **SSH-lockout protection**: explicit allowlist for which iface can go into monitor mode, plus a recovery watchdog as last resort
 
 ## Hardware
@@ -32,7 +33,7 @@ sudo ./install.sh
 
 `install.sh` is the only operator-facing entry point. It:
 
-1. Installs system dependencies (aircrack-ng suite, hcxdumptool, hcxtools, hashcat, john, nmap, build tools)
+1. Installs system dependencies (aircrack-ng suite, hcxdumptool, hcxtools, cowpatty, john, nmap, build tools)
 2. Installs the RTL8812AU/RTL8821AU driver from source if not already present
 3. Copies code to `/opt/pendonn/`, creates a venv, installs Python deps from `requirements.txt`
 4. Downloads `rockyou.txt` to `/usr/share/wordlists/`
@@ -94,8 +95,10 @@ The full annotated default lives in [config/config.example.json](config/config.e
 | `allowlist` | `ssids` | List of authorized SSIDs. Empty + strict = passive scan only, no attacks. |
 | `safety` | `armed_override` (default `false`) | Bypass all SSH-lockout guards. Only set if you SSH'd over Ethernet or accept losing your shell. See [docs/SAFETY.md](docs/SAFETY.md). |
 | `web.basic_auth` | `enabled` / `username` / `password_hash` | Login for the web UI. Always enable in production. |
-| `cracking` | `engines` | Order to try: `["hashcat", "aircrack-ng", "john"]`. Hashcat is the modern path; aircrack/john are fallbacks. |
+| `cracking` | `engines` | Order to try: `["cowpatty", "aircrack-ng", "john"]`. Cowpatty reads `.pcapng` natively and is the most reliable engine on ARM. |
 | `cracking` | `wordlist_path` | Default `/usr/share/wordlists/rockyou.txt`. Operator can swap. |
+| `cracking` | `extra_wordlists` | List of additional wordlist paths to try **before** the main wordlist (e.g. test password, probable-WPA, SecLists top-N). Empty by default. |
+| `notifications.ntfy` | `enabled` / `topic` | Push notifications via ntfy. Disabled by default. Pick a long random topic — anyone who knows it can read your alerts. See "Notifications" below. |
 | `display` | `enabled` | Set `false` for headless Pi. |
 
 ## Operating
@@ -123,6 +126,42 @@ sudo systemctl restart pendonn
 
 Captured handshakes land in `/opt/pendonn/handshakes/` as `<BSSID>_<TIMESTAMP>-01.cap`. Cracked passwords go into `data/pendonn.db` and the web UI's "Cracked" page.
 
+## Notifications
+
+PenDonn can push alerts to your phone via [ntfy.sh](https://ntfy.sh) — no account, no app store hoops, just install the official ntfy app and subscribe to your topic. Disabled by default; opt in via `config.json.local`.
+
+```json
+{
+  "notifications": {
+    "ntfy": {
+      "enabled": true,
+      "server":  "https://ntfy.sh",
+      "topic":   "pendonn-<long-random-string>",
+      "token":   "",
+      "notify_on": {
+        "handshake":     true,
+        "crack":         true,
+        "vulnerability": true,
+        "scan":          true
+      }
+    }
+  }
+}
+```
+
+Event → ntfy priority mapping:
+
+| Event | Priority | Phone behaviour |
+|---|---|---|
+| Handshake captured | 2 (low) | Silent / banner |
+| Scan complete | 3 (default) | Normal notification |
+| PSK cracked | 4 (high) | Sound + vibrate |
+| Critical/high vulnerability | 5 (urgent) | Bypasses Do Not Disturb on most phones |
+
+**Topic security:** `ntfy.sh` topics are public by URL — anyone who guesses your topic name can read your notifications. Treat the topic string as a shared secret. Use `openssl rand -hex 16` for a unique unguessable name, and keep it in `config.json.local` (untracked) — never in committed defaults.
+
+For sensitive engagements, run a self-hosted ntfy server with auth (`server: "https://ntfy.example.com"`, `token: "tk_..."`).
+
 ## Safety model
 
 There is one principle: **never lock yourself out of SSH**.
@@ -149,7 +188,7 @@ pendonn/
 │   ├── config.json                 # tracked defaults
 │   ├── config.example.json         # annotated reference
 │   └── config.rpi_zero2w.json      # single-radio variant
-├── tests/            # 124 unit tests, run with: python -m unittest discover tests
+├── tests/            # 137 unit tests, run with: python -m unittest discover tests
 ├── docs/
 │   ├── SAFETY.md                   # SSH lockout + plugin loader trust model
 │   └── DISPLAY_SETUP.md            # Waveshare wiring + library install
@@ -165,7 +204,7 @@ pendonn/
 python -m venv venv
 . venv/bin/activate                 # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-python -m unittest discover tests   # 124 tests, ~7s on a laptop
+python -m unittest discover tests   # 137 tests, ~7s on a laptop
 ```
 
 POSIX-only tests (e.g. `/proc` walking) are skipped on Windows. The web UI runs locally:
@@ -177,7 +216,7 @@ PYTHONPATH=. uvicorn webui.app:app --host 127.0.0.1 --port 8081
 ## Known limitations
 
 - **PMKID requires the AP to expose it.** Many enterprise APs (Aruba, Cisco, Meraki) disable PMKID; the daemon falls back to classic deauth+handshake on those.
-- **No remote cracking offload.** Handshakes are cracked locally on the Pi (CPU only — slow). Backlog item: ship `.22000` to a remote GPU host.
+- **No remote cracking offload.** Handshakes are cracked locally on the Pi (CPU only — slow). Backlog item: ship `.22000` to a remote GPU host running hashcat.
 - **`install.sh` re-runs are idempotent for data, not for system-level state.** Re-installing won't lose your handshakes, but it will re-overwrite the systemd units and re-run the wizard.
 - **Plugin loader executes any `.py` file in `plugins/`** as root. The `0700 root:root` permission lockdown + ownership check (see [docs/SAFETY.md](docs/SAFETY.md)) prevents the most common accidents but is not a sandbox.
 

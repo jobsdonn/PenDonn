@@ -68,6 +68,21 @@
     "refresh_interval": 30,
     "brightness": 80
   },
+  "notifications": {
+    "_comment": "Push notifications via ntfy.sh. Disabled by default. To enable: in config.json.local set notifications.ntfy.enabled=true and notifications.ntfy.topic to a long random string (treat the topic as a shared secret — anyone who knows it can read your notifications). For self-hosted ntfy, also set notifications.ntfy.server. Per-event opt-out via notify_on: {handshake|crack|vulnerability|scan: false}.",
+    "ntfy": {
+      "enabled": false,
+      "server": "https://ntfy.sh",
+      "topic": "",
+      "token": "",
+      "notify_on": {
+        "handshake": true,
+        "crack": true,
+        "vulnerability": true,
+        "scan": true
+      }
+    }
+  },
   "safety": {
     "_comment": "SSH-lockout protection. Defaults are intentionally strict. See docs/SAFETY.md before changing anything here.",
     "enabled": true,

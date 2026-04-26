@@ -35,11 +35,12 @@ def _hashfile_for(capture_file: str) -> str:
 class PasswordCracker:
     """Password cracking with John the Ripper and Hashcat"""
     
-    def __init__(self, config: Dict, database, wifi_scanner=None):
+    def __init__(self, config: Dict, database, wifi_scanner=None, notifier=None):
         """Initialize password cracker"""
         self.config = config
         self.db = database
         self.wifi_scanner = wifi_scanner
+        self.notifier = notifier
         
         self.enabled = config['cracking']['enabled']
         self.engines = config['cracking']['engines']
@@ -246,6 +247,11 @@ class PasswordCracker:
                                 crack_time=int(crack_time)
                             )
                             logger.info(f"Password cracked for {handshake['ssid']}: {password}")
+                            if self.notifier:
+                                self.notifier.password_cracked(
+                                    handshake['ssid'], handshake['bssid'],
+                                    engine, int(crack_time)
+                                )
                             break
                     if cracked:
                         break

@@ -20,10 +20,11 @@ logger = logging.getLogger(__name__)
 class WiFiScanner:
     """WiFi scanning using airodump-ng (more reliable than Scapy)"""
     
-    def __init__(self, config: Dict, database):
+    def __init__(self, config: Dict, database, notifier=None):
         """Initialize WiFi scanner"""
         self.config = config
         self.db = database
+        self.notifier = notifier
         
         # Resolve interfaces by MAC address (handles USB adapter name swapping)
         interfaces = resolve_interfaces(config)
@@ -1183,6 +1184,8 @@ class WiFiScanner:
                     quality='good',
                 )
                 logger.info(f"✅ Handshake saved: {ssid}")
+                if self.notifier:
+                    self.notifier.handshake_captured(ssid, bssid)
             else:
                 logger.warning(f"❌ Could not save handshake for {ssid}: network_id not found")
         else:
