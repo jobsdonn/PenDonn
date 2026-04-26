@@ -619,6 +619,32 @@ SyslogIdentifier=pendonn-watchdog
 WantedBy=multi-user.target
 EOF
 
+# Undervoltage monitor: logs vcgencmd get_throttled every 30s to journal.
+# Lets us diagnose PSU brown-outs from crash logs without adding any attack
+# surface — it only reads a firmware register and writes to the journal.
+UVMON_SERVICE_NAME="pendonn-uvmon"
+cat > /etc/systemd/system/${UVMON_SERVICE_NAME}.service << EOF
+[Unit]
+Description=PenDonn undervoltage / throttle monitor
+After=sysinit.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/bin/bash $INSTALL_DIR/scripts/undervoltage-monitor.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pendonn-uvmon
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now ${UVMON_SERVICE_NAME}.service 2>/dev/null || true
+
 print_success "Systemd service files created"
 
 # Check disk space before initializing database

@@ -32,6 +32,7 @@ import abc
 import json
 import logging
 import threading
+import time
 from queue import Queue, Empty
 from typing import Dict, List, Optional
 
@@ -93,18 +94,42 @@ class _Backend(abc.ABC):
         """Send one event over the wire. Should raise on failure so the
         worker can log it; the worker swallows the exception."""
 
+    # Retry delays (seconds) for transient network errors (DNS, ECONNREFUSED).
+    # Injection on adjacent radios can briefly disrupt the management WiFi;
+    # 30s is usually enough for connectivity to recover between bursts.
+    _RETRY_DELAYS = (10, 30)
+
     def _run(self):
         while not self._stop.is_set():
             try:
                 event = self._queue.get(timeout=1.0)
             except Empty:
                 continue
-            try:
-                self._deliver(event)
-            except urllib.error.URLError as e:
-                logger.warning(f"{self.name} delivery failed: {e}")
-            except Exception as e:
-                logger.warning(f"{self.name} unexpected error: {e}")
+            last_err = None
+            for attempt, delay in enumerate(
+                [0] + list(self._RETRY_DELAYS), start=1
+            ):
+                if delay:
+                    time.sleep(delay)
+                try:
+                    self._deliver(event)
+                    last_err = None
+                    break
+                except urllib.error.URLError as e:
+                    last_err = e
+                    if attempt <= len(self._RETRY_DELAYS):
+                        logger.debug(
+                            f"{self.name} delivery attempt {attempt} failed "
+                            f"({e}); retrying in {self._RETRY_DELAYS[attempt-1]}s"
+                        )
+                except Exception as e:
+                    logger.warning(f"{self.name} unexpected error: {e}")
+                    break
+            if last_err is not None:
+                logger.warning(
+                    f"{self.name} delivery failed after "
+                    f"{len(self._RETRY_DELAYS)+1} attempts: {last_err}"
+                )
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -430,5 +430,5 @@ def reset_database(
         "ok": True,
         "backup": backup_path,
         "tables_truncated": list(_TABLES_TO_TRUNCATE),
-        "ts": datetime.utcnow().isoformat() + "Z",
+        "ts": datetime.now(tz=timezone.utc).isoformat(),
     }
