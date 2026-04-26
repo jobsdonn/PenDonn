@@ -30,11 +30,22 @@ def get_mac_to_interface_mapping() -> Dict[str, str]:
                 if len(parts) >= 2:
                     current_iface = parts[1].split(':')[0]  # Extract "wlan0"
             
-            # MAC address line: "    link/ether aa:bb:cc:dd:ee:ff ..." or "    link/ieee802.11/radiotap aa:bb:cc:dd:ee:ff ..."
+            # MAC address line: "    link/ether aa:bb:cc:dd:ee:ff brd ff:ff:ff:ff:ff:ff [permaddr xx:xx:xx:xx:xx:xx]"
             elif ('link/ether' in line or 'link/ieee802.11' in line) and current_iface:
-                mac = line.strip().split()[1].lower()
+                parts = line.strip().split()
+                mac = parts[1].lower()
                 mapping[mac] = current_iface
-                logger.debug(f"Found interface {current_iface} with MAC {mac}")
+                # rtl88xxau randomises its MAC in monitor mode; the original
+                # hardware address is retained as "permaddr" on the same line.
+                if 'permaddr' in parts:
+                    perm_mac = parts[parts.index('permaddr') + 1].lower()
+                    if perm_mac != mac:
+                        mapping[perm_mac] = current_iface
+                        logger.debug(f"Found interface {current_iface} with MAC {mac} (permaddr {perm_mac})")
+                    else:
+                        logger.debug(f"Found interface {current_iface} with MAC {mac}")
+                else:
+                    logger.debug(f"Found interface {current_iface} with MAC {mac}")
                 current_iface = None
         
         return mapping

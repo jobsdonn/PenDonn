@@ -265,7 +265,36 @@ class WiFiScanner:
         """Stop WiFi scanner"""
         logger.info("Stopping WiFi scanner...")
         self.running = False
+        self._restore_interfaces()
         logger.info("WiFi scanner stopped")
+
+    def _restore_interfaces(self):
+        """Put monitor/attack interfaces back to managed mode on shutdown.
+
+        Without this, the rtl88xxau driver randomises the MAC when the
+        interface is left in monitor mode, breaking MAC-based interface
+        detection on the next daemon start (permaddr still works, but
+        the preflight check also validates mode). Called from stop() so
+        both clean shutdowns and systemd SIGTERM paths leave a clean state.
+        """
+        for iface in (self.interface, self.attack_interface):
+            if not iface or iface == self.management_interface:
+                continue
+            try:
+                import subprocess as _sp
+                result = _sp.run(
+                    ['iw', iface, 'info'],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if 'type monitor' not in result.stdout.lower():
+                    continue
+                logger.info(f"Restoring {iface} to managed mode...")
+                _sp.run(['ip', 'link', 'set', iface, 'down'], timeout=5, check=False)
+                _sp.run(['iw', iface, 'set', 'type', 'managed'], timeout=5, check=False)
+                _sp.run(['ip', 'link', 'set', iface, 'up'], timeout=5, check=False)
+                logger.info(f"✓ {iface} restored to managed mode")
+            except Exception as e:
+                logger.warning(f"Could not restore {iface} to managed mode: {e}")
     
     def _enable_monitor_mode(self, interface: str):
         """Enable monitor mode on interface"""
