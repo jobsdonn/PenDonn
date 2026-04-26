@@ -20,7 +20,10 @@ class BluetoothScanner(PluginBase):
     """Bluetooth device and service scanner"""
     
     def __init__(self, config, db):
-        super().__init__(config, db, "Bluetooth Scanner")
+        # Don't pass "Bluetooth Scanner" as a positional — name comes from
+        # plugin.json via PluginBase.__init__. Old call leaked the literal
+        # into self.extra_args; harmless but wrong.
+        super().__init__(config, db)
         self.scan_duration = 10  # seconds
         self.discovered_devices = []
         
@@ -351,26 +354,13 @@ class BluetoothScanner(PluginBase):
         vulnerabilities = []
         mac = device.get('mac')
         name = device.get('name', 'Unknown')
-        
-        # Check 1: Device discoverable (information disclosure)
-        vulnerabilities.append({
-            'type': 'Bluetooth Device Discoverable',
-            'severity': 'low',
-            'description': f"Device '{name}' is discoverable and broadcasting information"
-        })
-        
-        self.db.add_vulnerability(
-            scan_id=scan_id,
-            host=mac,
-            port=0,
-            service='bluetooth',
-            vuln_type='Information Disclosure',
-            severity='low',
-            description=f"Bluetooth device '{name}' ({mac}) is discoverable",
-            plugin_name=self.name
-        )
-        
-        # Check 2: Check for open services
+
+        # NOTE: Previously every discovered device was logged as a "Bluetooth
+        # Device Discoverable" vuln. That's not a vuln — discoverability is
+        # the *point* of inquiry mode. Removed. If we want a "device count"
+        # signal it belongs in the scan report, not the vulnerabilities table.
+
+        # Check for open services
         services = device.get('services', [])
         for service in services:
             service_name = service.get('name', 'Unknown Service')

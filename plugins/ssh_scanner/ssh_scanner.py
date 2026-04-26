@@ -98,24 +98,28 @@ class SSHScanner(PluginBase):
                 except Exception as e:
                     self.log_error(f"Version parsing error: {e}")
             
-            # Test weak credentials
-            for username, password in weak_credentials:
-                if self._test_ssh_credentials(host, port, username, password):
-                    self.log_warning(f"Weak SSH credentials found on {host}: {username}:{password}")
-                    
-                    self.db.add_vulnerability(
-                        scan_id=scan_id,
-                        host=host,
-                        port=port,
-                        service='ssh',
-                        vuln_type='Weak SSH Credentials',
-                        severity='critical',
-                        description=f'SSH accessible with weak credentials: {username}:{password}',
-                        plugin_name=self.name
-                    )
-                    
-                    vulnerabilities_found += 1
-                    break  # Don't test more once we find one
+            # Test weak credentials — gated on safety.plugins.allow_credential_attempts.
+            # Default off: 6 sequential auth failures will lock most SSH servers.
+            if self.credentials_allowed():
+                for username, password in weak_credentials:
+                    if self._test_ssh_credentials(host, port, username, password):
+                        self.log_warning(f"Weak SSH credentials found on {host}: {username}:{password}")
+
+                        self.db.add_vulnerability(
+                            scan_id=scan_id,
+                            host=host,
+                            port=port,
+                            service='ssh',
+                            vuln_type='Weak SSH Credentials',
+                            severity='critical',
+                            description=f'SSH accessible with weak credentials: {username}:{password}',
+                            plugin_name=self.name
+                        )
+
+                        vulnerabilities_found += 1
+                        break  # Don't test more once we find one
+            else:
+                self.log_debug(f"Skipping credential attempts on {host}:{port} (lockout protection active)")
             
             # Check for root login allowed
             if self._check_root_login(host, port):

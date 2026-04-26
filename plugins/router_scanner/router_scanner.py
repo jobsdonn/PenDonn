@@ -98,27 +98,33 @@ class RouterScanner(PluginBase):
             # Detect device type
             device_info = self._detect_device(url)
             
-            # Test default credentials
-            for username, password in self.DEFAULT_CREDS:
-                if self._test_web_auth(url, username, password):
-                    self.log_warning(f"Default credentials found on {url} - {username}:{password}")
-                    
-                    desc = f'Device accessible with default credentials: {username}:{password}'
-                    if device_info:
-                        desc += f' (Detected: {device_info})'
-                    
-                    self.db.add_vulnerability(
-                        scan_id=scan_id,
-                        host=host,
-                        port=port,
-                        service='http',
-                        vuln_type='Default Router/IoT Credentials',
-                        severity='critical',
-                        description=desc,
-                        plugin_name=self.name
-                    )
-                    vulnerabilities_found += 1
-                    break  # Found one, don't test more
+            # Test default credentials — gated on safety.plugins.allow_credential_attempts.
+            # Default off: 30 sequential auth failures will lock virtually every
+            # router/camera/printer firmware. The audit (docs/PLUGIN_AUDIT_2026-04-26.md)
+            # marked this as the highest-risk plugin for lockouts.
+            if self.credentials_allowed():
+                for username, password in self.DEFAULT_CREDS:
+                    if self._test_web_auth(url, username, password):
+                        self.log_warning(f"Default credentials found on {url} - {username}:{password}")
+
+                        desc = f'Device accessible with default credentials: {username}:{password}'
+                        if device_info:
+                            desc += f' (Detected: {device_info})'
+
+                        self.db.add_vulnerability(
+                            scan_id=scan_id,
+                            host=host,
+                            port=port,
+                            service='http',
+                            vuln_type='Default Router/IoT Credentials',
+                            severity='critical',
+                            description=desc,
+                            plugin_name=self.name
+                        )
+                        vulnerabilities_found += 1
+                        break  # Found one, don't test more
+            else:
+                self.log_debug(f"Skipping credential attempts on {url} (lockout protection active)")
         
         self.log_info(f"Router/IoT scan complete. Found {vulnerabilities_found} vulnerabilities")
         

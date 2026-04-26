@@ -112,6 +112,10 @@
     "block_monitor_on_management": true,
     "block_kill_management_supplicant": true,
     "armed_override": false,
-    "explicit_safe_ifaces": []
+    "explicit_safe_ifaces": [],
+    "plugins": {
+      "_comment": "allow_credential_attempts gates plugins that try weak/default credentials against discovered services (ssh_scanner, ftp_scanner, router_scanner, web_scanner). DEFAULT FALSE: account-lockout protection on target devices is non-negotiable. Set true only after operator review of the audit in docs/PLUGIN_AUDIT_2026-04-26.md.",
+      "allow_credential_attempts": false
+    }
   }
 }

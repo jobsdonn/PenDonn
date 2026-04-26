@@ -103,22 +103,28 @@ class WebScanner(PluginBase):
                 
                 vulnerabilities_found += 1
             
-            # Check for default credentials on common paths
-            if self._check_default_credentials(url):
-                self.log_warning(f"Default credentials found on {url}")
-                
-                self.db.add_vulnerability(
-                    scan_id=scan_id,
-                    host=host,
-                    port=port,
-                    service='http',
-                    vuln_type='Default Credentials',
-                    severity='critical',
-                    description='Web application uses default credentials.',
-                    plugin_name=self.name
-                )
-                
-                vulnerabilities_found += 1
+            # Check for default credentials — gated on safety.plugins.allow_credential_attempts.
+            # POSTing creds to /wp-login.php and /admin/ paths is a real
+            # brute-force attempt and will lock WordPress accounts after 3
+            # failures (default wp-limit-login).
+            if self.credentials_allowed():
+                if self._check_default_credentials(url):
+                    self.log_warning(f"Default credentials found on {url}")
+
+                    self.db.add_vulnerability(
+                        scan_id=scan_id,
+                        host=host,
+                        port=port,
+                        service='http',
+                        vuln_type='Default Credentials',
+                        severity='critical',
+                        description='Web application uses default credentials.',
+                        plugin_name=self.name
+                    )
+
+                    vulnerabilities_found += 1
+            else:
+                self.log_debug(f"Skipping credential attempts on {url} (lockout protection active)")
             
             # Check for common sensitive files
             sensitive_files = self._check_sensitive_files(url)

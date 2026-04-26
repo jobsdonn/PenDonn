@@ -17,43 +17,49 @@ class FTPScanner(PluginBase):
     """FTP vulnerability scanner"""
     
     def run(self, scan_id: int, hosts: List[str], scan_results: List[Dict]) -> Dict:
-        """Scan for FTP vulnerabilities"""
+        """Scan for FTP vulnerabilities.
+
+        Anonymous-access check is unconditional (no credentials = no lockout).
+        Weak-credential probing is gated on safety.plugins.allow_credential_attempts;
+        FTP servers running fail2ban or hosts.deny will block our source IP after
+        a few failures.
+        """
         self.log_info("Starting FTP vulnerability scan")
-        
+
         vulnerabilities_found = 0
-        
-        # Weak credentials to test
+
+        # Weak credentials to test — only used if operator opted in.
+        # `anonymous` is intentionally left out here because it's covered by
+        # _check_anonymous_ftp() above (read-only, no lockout).
         weak_creds = [
             ('ftp', 'ftp'),
-            ('anonymous', ''),
-            ('anonymous', 'anonymous'),
             ('admin', 'admin'),
             ('root', 'root'),
-            ('user', 'user')
+            ('user', 'user'),
         ]
-        
+
         # Find hosts with FTP port open
         ftp_hosts = []
         for host_scan in scan_results:
             host = host_scan.get('ip')
             ports = host_scan.get('ports', [])
-            
+
             for port_info in ports:
                 if port_info['port'] in [21, 2121] or 'ftp' in port_info.get('service', '').lower():
                     ftp_hosts.append({'host': host, 'port': port_info['port']})
-        
+
         self.log_info(f"Found {len(ftp_hosts)} FTP servers")
-        
+
         for ftp_host in ftp_hosts:
             host = ftp_host['host']
             port = ftp_host['port']
-            
+
             self.log_info(f"Scanning FTP on {host}:{port}")
-            
-            # Check for anonymous FTP
+
+            # Check for anonymous FTP (always — read-only, no lockout risk)
             if self._check_anonymous_ftp(host, port):
                 self.log_warning(f"Anonymous FTP access on {host}:{port}")
-                
+
                 self.db.add_vulnerability(
                     scan_id=scan_id,
                     host=host,
@@ -66,25 +72,28 @@ class FTPScanner(PluginBase):
                 )
                 vulnerabilities_found += 1
                 continue  # Skip credential testing if anonymous works
-            
-            # Test weak credentials
-            for username, password in weak_creds:
-                if self._test_ftp_credentials(host, port, username, password):
-                    self.log_warning(f"Weak FTP credentials on {host}:{port} - {username}:{password}")
-                    
-                    self.db.add_vulnerability(
-                        scan_id=scan_id,
-                        host=host,
-                        port=port,
-                        service='ftp',
-                        vuln_type='Weak FTP Credentials',
-                        severity='critical',
-                        description=f'FTP accessible with weak credentials: {username}:{password}',
-                        plugin_name=self.name
-                    )
-                    vulnerabilities_found += 1
-                    break
-        
+
+            # Test weak credentials — gated on safety.plugins.allow_credential_attempts.
+            if self.credentials_allowed():
+                for username, password in weak_creds:
+                    if self._test_ftp_credentials(host, port, username, password):
+                        self.log_warning(f"Weak FTP credentials on {host}:{port} - {username}:{password}")
+
+                        self.db.add_vulnerability(
+                            scan_id=scan_id,
+                            host=host,
+                            port=port,
+                            service='ftp',
+                            vuln_type='Weak FTP Credentials',
+                            severity='critical',
+                            description=f'FTP accessible with weak credentials: {username}:{password}',
+                            plugin_name=self.name
+                        )
+                        vulnerabilities_found += 1
+                        break
+            else:
+                self.log_debug(f"Skipping credential attempts on {host}:{port} (lockout protection active)")
+
         self.log_info(f"FTP scan complete. Found {vulnerabilities_found} vulnerabilities")
         
         return {

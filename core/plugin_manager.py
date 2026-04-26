@@ -122,6 +122,16 @@ class PluginBase(ABC):
         AttributeError on every error path because it didn't exist."""
         logger.debug(f"[{self.name}] {message}")
 
+    def credentials_allowed(self) -> bool:
+        """Returns True iff the operator has explicitly enabled credential
+        attempts via `safety.plugins.allow_credential_attempts=true`.
+
+        Default is False — protects against account lockouts on target
+        devices (routers, cameras, printers all lock after 3-5 failures).
+        Brute-force plugins MUST gate their credential loops on this.
+        """
+        return bool(getattr(self, '_allow_credential_attempts', False))
+
 
 class PluginManager:
     """Manages loading and execution of plugins"""
@@ -138,9 +148,18 @@ class PluginManager:
         # Operator escape hatch for the loader-side ownership/mode checks.
         # Off by default because the whole point of those checks is to make
         # the common prod accident impossible.
-        safety_cfg = (config.get('safety') or {}).get('plugin_loader') or {}
+        loader_cfg = (config.get('safety') or {}).get('plugin_loader') or {}
         self.allow_insecure_plugin_files = bool(
-            safety_cfg.get('allow_insecure_files', False)
+            loader_cfg.get('allow_insecure_files', False)
+        )
+
+        # Operator opt-in for plugins that try credential attempts (ssh, ftp,
+        # router, web). Off by default because target devices lock accounts
+        # after 3-5 failures and that's a hard rule for this project. See
+        # docs/PLUGIN_AUDIT_2026-04-26.md for which plugins this covers.
+        plugins_safety_cfg = (config.get('safety') or {}).get('plugins') or {}
+        self.allow_credential_attempts = bool(
+            plugins_safety_cfg.get('allow_credential_attempts', False)
         )
 
         self.plugins = []
@@ -296,6 +315,10 @@ class PluginManager:
             except TypeError as e:
                 logger.error(f"Failed to initialize plugin {plugin_config['name']}: {e}")
                 return
+
+            # Inject the credential-attempts gate. Plugins read via
+            # self.credentials_allowed() — see PluginBase.
+            plugin_instance._allow_credential_attempts = self.allow_credential_attempts
 
             self.plugins.append(plugin_instance)
             logger.info(f"Loaded plugin: {plugin_config['name']} v{plugin_config.get('version', '1.0.0')}")

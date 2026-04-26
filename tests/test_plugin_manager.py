@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from core.plugin_manager import _check_plugin_file_safety
+from core.plugin_manager import _check_plugin_file_safety, PluginBase, PluginManager
 
 
 @unittest.skipIf(sys.platform == "win32", "POSIX permission checks N/A on Windows")
@@ -72,6 +72,60 @@ class TestCheckPluginFileSafetyOnWindows(unittest.TestCase):
             self.assertIsNone(_check_plugin_file_safety(path))
         finally:
             os.unlink(path)
+
+
+class _FakePlugin(PluginBase):
+    """Bare-bones PluginBase subclass for credentials_allowed() tests."""
+    def run(self, scan_id, hosts, scan_results):
+        return {'vulnerabilities': 0}
+
+
+class TestCredentialsAllowedGate(unittest.TestCase):
+    """The credentials_allowed() gate defaults to False; explicit opt-in only.
+
+    Any plugin doing brute-force / weak-cred testing MUST honor this.
+    """
+    def test_default_is_false(self):
+        plugin = _FakePlugin({'name': 'fake'})
+        self.assertFalse(plugin.credentials_allowed())
+
+    def test_flag_set_true(self):
+        plugin = _FakePlugin({'name': 'fake'})
+        plugin._allow_credential_attempts = True
+        self.assertTrue(plugin.credentials_allowed())
+
+    def test_flag_set_false(self):
+        plugin = _FakePlugin({'name': 'fake'})
+        plugin._allow_credential_attempts = False
+        self.assertFalse(plugin.credentials_allowed())
+
+
+class TestPluginManagerReadsSafetyConfig(unittest.TestCase):
+    """PluginManager exposes safety.plugins.allow_credential_attempts."""
+    def _make(self, safety_cfg):
+        cfg = {
+            'plugins': {'enabled': False, 'directory': '/tmp', 'auto_load': False},
+            'safety': safety_cfg,
+        }
+        return PluginManager(cfg, database=None)
+
+    def test_default_off(self):
+        pm = self._make({})
+        self.assertFalse(pm.allow_credential_attempts)
+
+    def test_explicit_off(self):
+        pm = self._make({'plugins': {'allow_credential_attempts': False}})
+        self.assertFalse(pm.allow_credential_attempts)
+
+    def test_explicit_on(self):
+        pm = self._make({'plugins': {'allow_credential_attempts': True}})
+        self.assertTrue(pm.allow_credential_attempts)
+
+    def test_safety_section_missing(self):
+        # No safety key at all → gate stays off (fail-safe)
+        cfg = {'plugins': {'enabled': False, 'directory': '/tmp', 'auto_load': False}}
+        pm = PluginManager(cfg, database=None)
+        self.assertFalse(pm.allow_credential_attempts)
 
 
 if __name__ == "__main__":

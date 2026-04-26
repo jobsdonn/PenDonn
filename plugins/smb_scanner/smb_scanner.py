@@ -195,17 +195,15 @@ class SMBScanner(PluginBase):
         return shares
     
     def _check_share_writable(self, host: str, share: str) -> bool:
-        """Check if SMB share is writable"""
-        try:
-            # Attempt to create a file
-            result = subprocess.run(
-                ['smbclient', f'//{host}/{share}', '-N', '-c', 'mkdir testdir'],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            return result.returncode == 0
-        
-        except Exception:
-            return False
+        """Always returns False — writable-detection disabled.
+
+        Previously this ran `smbclient ... -c 'mkdir testdir'` which actually
+        creates a directory on the target share, leaving an artifact and
+        tripping DLP/AV monitors. The audit (docs/PLUGIN_AUDIT_2026-04-26.md)
+        flagged this as a target-side artifact violation. There's no
+        non-intrusive way to determine writable from a remote SMB session
+        without ACL inspection (which requires authentication anyway), so
+        we simply don't report writable status. Anonymous null-session
+        access by itself is the meaningful finding.
+        """
+        return False
