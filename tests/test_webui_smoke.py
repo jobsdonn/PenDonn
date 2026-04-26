@@ -648,6 +648,58 @@ class TestSettingsPage(unittest.TestCase):
         r3 = self.client.post("/partials/allowlist/add", data={"ssid": "a" * 33})
         self.assertEqual(r3.status_code, 400)
 
+    def test_cracking_partial_renders(self):
+        r = self.client.get("/partials/cracking")
+        self.assertEqual(r.status_code, 200)
+        # Engine names present
+        for eng in ("cowpatty", "aircrack-ng", "john"):
+            self.assertIn(eng, r.text)
+
+    def test_cracking_save_reorders_engines_and_persists(self):
+        r = self.client.post("/partials/cracking/save", data={
+            "engines": "john,aircrack-ng,cowpatty",
+            "wordlist_path": "/usr/share/wordlists/rockyou.txt",
+            "extra_wordlists": "",
+            "max_concurrent": "2",
+            "auto_start": "1",
+        })
+        self.assertEqual(r.status_code, 200)
+        # Template re-rendered with the new order
+        pos_john = r.text.find("john")
+        pos_air = r.text.find("aircrack-ng")
+        pos_cow = r.text.find("cowpatty")
+        self.assertLess(pos_john, pos_air)
+        self.assertLess(pos_air, pos_cow)
+        # Persisted to overlay
+        import json as _json
+        with open(self.config_path + ".local") as f:
+            data = _json.load(f)
+        self.assertEqual(data["cracking"]["engines"][0], "john")
+        self.assertEqual(data["cracking"]["max_concurrent_cracks"], 2)
+
+    def test_cracking_save_rejects_bad_engine_list(self):
+        r = self.client.post("/partials/cracking/save", data={
+            "engines": "evil,__bad__",
+            "wordlist_path": "/tmp/wl.txt",
+            "max_concurrent": "2",
+        })
+        self.assertEqual(r.status_code, 400)
+
+    def test_cracking_save_rejects_out_of_range_concurrency(self):
+        r = self.client.post("/partials/cracking/save", data={
+            "engines": "cowpatty",
+            "wordlist_path": "/tmp/wl.txt",
+            "max_concurrent": "99",
+        })
+        self.assertEqual(r.status_code, 400)
+
+    def test_cracking_settings_section_on_settings_page(self):
+        r = self.client.get("/settings")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Cracking", r.text)
+        # Partial content present inline
+        self.assertIn("Engine order", r.text)
+
 
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi not installed")
 class TestCaptivePortal(unittest.TestCase):

@@ -1,0 +1,127 @@
+{# Cracking settings — engine order, wordlists, concurrency.
+
+   Engine ordering is handled client-side with Alpine.js: the user clicks
+   up/down arrows, Alpine reorders the display list, and the final order
+   is serialised into a comma-separated hidden <input> on submit.
+
+   Writes to config.json.local; daemon picks up changes on next restart. #}
+
+<div id="cracking-settings"
+     x-data="{
+        engines: {{ cracking_engines | tojson }},
+        move(i, dir) {
+            let j = i + dir;
+            if (j < 0 || j >= this.engines.length) return;
+            [this.engines[i], this.engines[j]] = [this.engines[j], this.engines[i]];
+        }
+     }"
+     class="space-y-5">
+
+    {% if saved %}
+    <div class="rounded-md border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-200">
+        Saved — daemon picks up new settings on next restart.
+    </div>
+    {% endif %}
+
+    <form hx-post="/partials/cracking/save"
+          hx-target="#cracking-settings"
+          hx-swap="outerHTML"
+          class="space-y-5">
+
+        {# ---- engine order ---- #}
+        <div>
+            <label class="text-sm font-medium text-slate-700 dark:text-slate-200">
+                Engine order
+            </label>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Tried in order; first success wins. cowpatty reads .pcapng natively and is the most
+                reliable on ARM — keep it first unless you have a reason not to.
+            </p>
+            <div class="mt-2 space-y-1.5">
+                <template x-for="(eng, i) in engines" :key="eng">
+                    <div class="flex items-center gap-2 rounded-md border border-slate-200 dark:border-ink-600 bg-slate-50 dark:bg-ink-800 px-3 py-1.5">
+                        <span class="w-5 text-xs text-slate-400 text-right select-none" x-text="i + 1 + '.'"></span>
+                        <span class="flex-1 text-sm font-mono" x-text="eng"></span>
+                        <button type="button"
+                                @click="move(i, -1)"
+                                :disabled="i === 0"
+                                class="px-1.5 py-0.5 text-xs rounded bg-white dark:bg-ink-700 border border-slate-200 dark:border-ink-600 hover:bg-slate-100 dark:hover:bg-ink-600 disabled:opacity-30 disabled:cursor-not-allowed">
+                            ↑
+                        </button>
+                        <button type="button"
+                                @click="move(i, 1)"
+                                :disabled="i === engines.length - 1"
+                                class="px-1.5 py-0.5 text-xs rounded bg-white dark:bg-ink-700 border border-slate-200 dark:border-ink-600 hover:bg-slate-100 dark:hover:bg-ink-600 disabled:opacity-30 disabled:cursor-not-allowed">
+                            ↓
+                        </button>
+                    </div>
+                </template>
+            </div>
+            {# serialise final order into a single hidden field #}
+            <input type="hidden" name="engines" :value="engines.join(',')">
+        </div>
+
+        {# ---- main wordlist ---- #}
+        <div>
+            <label class="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                Main wordlist
+            </label>
+            <input type="text" name="wordlist_path"
+                   value="{{ cracking_wordlist }}"
+                   placeholder="/usr/share/wordlists/rockyou.txt"
+                   class="mt-1 w-full rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm font-mono">
+            <p class="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">
+                Absolute path on the Pi. Tried after all extra wordlists.
+            </p>
+        </div>
+
+        {# ---- extra wordlists ---- #}
+        <div>
+            <label class="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                Extra wordlists <span class="text-xs text-slate-400">(one path per line)</span>
+            </label>
+            <textarea name="extra_wordlists"
+                      rows="3"
+                      placeholder="/opt/pendonn/data/probable-WPA-v2.txt&#10;/opt/pendonn/data/top1000.txt"
+                      class="mt-1 w-full rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-xs font-mono">{{ cracking_extra_wordlists | join('\n') }}</textarea>
+            <p class="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">
+                Tried before the main wordlist — put your targeted lists here (probable-WPA, test
+                password, company name variants). Leave empty to start straight with rockyou.
+            </p>
+        </div>
+
+        {# ---- concurrency + auto-start ---- #}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Max concurrent crack jobs
+                </label>
+                <input type="number" name="max_concurrent"
+                       min="1" max="8"
+                       value="{{ cracking_max_concurrent }}"
+                       class="mt-1 w-24 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm">
+                <p class="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">
+                    Each job pins one CPU core. 2 is a safe default for a Pi 4.
+                </p>
+            </div>
+            <div class="flex items-center gap-3 pt-5">
+                <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+                    <input type="checkbox" name="auto_start" value="1"
+                           {% if cracking_auto_start %}checked{% endif %}
+                           class="rounded border-slate-300 dark:border-ink-600 text-accent-deep focus:ring-accent">
+                    Auto-start cracking on new handshake
+                </label>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2 pt-1">
+            <button type="submit"
+                    class="px-3 py-1.5 rounded-md bg-accent-deep text-white text-sm font-medium hover:bg-sky-600">
+                Save
+            </button>
+            <span class="text-[11px] text-slate-500 dark:text-slate-500 ml-auto">
+                Daemon picks up changes on next restart.
+            </span>
+        </div>
+    </form>
+</div>

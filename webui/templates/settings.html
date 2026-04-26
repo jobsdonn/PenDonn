@@ -99,6 +99,20 @@
         </div>
     </section>
 
+    <!-- Cracking settings: engine order, wordlists, concurrency -->
+    <section class="lg:col-span-3 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
+        <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
+            <h2 class="font-semibold">Cracking</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Engine priority order, wordlists, and concurrency. Written to
+                <code>config.json.local</code>; effective on daemon restart.
+            </p>
+        </header>
+        <div class="p-5">
+            {% include "partials/cracking.html" %}
+        </div>
+    </section>
+
     <!-- Config viewer (full-width, collapsible) -->
     <section class="lg:col-span-3 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl"
              x-data="{ open: false }">

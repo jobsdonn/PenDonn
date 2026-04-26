@@ -91,6 +91,8 @@ def settings_page(request: Request, username: str = Depends(require_login)):
     ctx.update(_scope_status(request))
     # Notifications partial expects ntfy/webhook dicts.
     ctx.update(_notifications_status(request))
+    # Cracking partial.
+    ctx.update(_cracking_status(cfg))
     return request.app.state.templates.TemplateResponse(
         request, "settings.html", ctx,
     )
@@ -554,4 +556,116 @@ def notifications_test(request: Request, username: str = Depends(require_login))
     ctx["test_message"] = msg
     return request.app.state.templates.TemplateResponse(
         request, "partials/notifications.html", ctx,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cracking settings (engine order, wordlists, concurrency)
+# ---------------------------------------------------------------------------
+
+_VALID_ENGINES = {"cowpatty", "aircrack-ng", "john"}
+_MAX_WORDLIST_PATH_LEN = 512
+
+
+def _cracking_status(config: Dict[str, Any]) -> Dict[str, Any]:
+    c = (config.get("cracking") or {})
+    engines = [e for e in (c.get("engines") or []) if e in _VALID_ENGINES]
+    # Ensure all known engines appear even if config only listed a subset.
+    for e in ("cowpatty", "aircrack-ng", "john"):
+        if e not in engines:
+            engines.append(e)
+    return {
+        "cracking_engines": engines,
+        "cracking_wordlist": c.get("wordlist_path", "/usr/share/wordlists/rockyou.txt"),
+        "cracking_extra_wordlists": list(c.get("extra_wordlists") or []),
+        "cracking_max_concurrent": int(c.get("max_concurrent_cracks", 2)),
+        "cracking_auto_start": bool(c.get("auto_start_cracking", True)),
+    }
+
+
+def _persist_cracking(
+    request: Request,
+    engines: list,
+    wordlist: str,
+    extra_wordlists: list,
+    max_concurrent: int,
+    auto_start: bool,
+) -> None:
+    overlay_path = local_overlay_path(request.app.state.config_path)
+    overlay: Dict[str, Any] = {}
+    if os.path.isfile(overlay_path):
+        try:
+            with open(overlay_path, "r", encoding="utf-8") as f:
+                overlay = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            overlay = {}
+    cr = overlay.setdefault("cracking", {})
+    cr["engines"] = engines
+    cr["wordlist_path"] = wordlist
+    cr["extra_wordlists"] = extra_wordlists
+    cr["max_concurrent_cracks"] = max_concurrent
+    cr["auto_start_cracking"] = auto_start
+    _atomic_write_local(overlay_path, overlay)
+
+    live_cr = request.app.state.config.setdefault("cracking", {})
+    live_cr.update(cr)
+
+
+@router.get("/partials/cracking")
+def cracking_partial(request: Request, username: str = Depends(require_login)):
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "partials/cracking.html",
+        _cracking_status(request.app.state.config),
+    )
+
+
+@router.post("/partials/cracking/save")
+def cracking_save(
+    request: Request,
+    engines: str = Form("cowpatty,aircrack-ng,john"),
+    wordlist_path: str = Form("/usr/share/wordlists/rockyou.txt"),
+    extra_wordlists: str = Form(""),  # newline-separated paths
+    max_concurrent: int = Form(2),
+    auto_start: str = Form(""),
+    username: str = Depends(require_login),
+):
+    """Save cracking settings to config.json.local.
+
+    `engines` is a comma-separated ordered list (e.g. cowpatty,aircrack-ng,john).
+    The UI builds this string from Alpine.js drag/reorder state before submit.
+    """
+    engine_list = [e.strip() for e in engines.split(",") if e.strip() in _VALID_ENGINES]
+    if not engine_list:
+        raise HTTPException(status_code=400, detail="at least one valid engine required")
+
+    wl_path = (wordlist_path or "").strip()
+    if not wl_path:
+        raise HTTPException(status_code=400, detail="wordlist_path required")
+    if len(wl_path) > _MAX_WORDLIST_PATH_LEN:
+        raise HTTPException(status_code=400, detail="wordlist_path too long")
+
+    extra = [
+        p.strip() for p in (extra_wordlists or "").splitlines()
+        if p.strip() and len(p.strip()) <= _MAX_WORDLIST_PATH_LEN
+    ]
+
+    if not 1 <= max_concurrent <= 8:
+        raise HTTPException(status_code=400, detail="max_concurrent must be 1-8")
+
+    auto = (auto_start or "").lower() in ("1", "true", "on", "yes")
+
+    _persist_cracking(request, engine_list, wl_path, extra, max_concurrent, auto)
+
+    request.app.state.db.add_audit_log(
+        action="cracking.update",
+        actor=username,
+        details={"engines": engine_list, "max_concurrent": max_concurrent},
+        source_ip=_client_ip(request),
+    )
+
+    ctx = _cracking_status(request.app.state.config)
+    ctx["saved"] = True
+    return request.app.state.templates.TemplateResponse(
+        request, "partials/cracking.html", ctx,
     )
