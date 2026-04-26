@@ -215,9 +215,19 @@ class PasswordCracker:
                     self.crack_queue.task_done()
                     break
                 
-                # Try each wordlist (extras first — usually small/targeted)
-                # then each engine per wordlist
-                all_wordlists = self.extra_wordlists + [self.wordlist]
+                # Build wordlist sequence:
+                #   1. OUI-based targeted list (vendor defaults + SSID variants)
+                #   2. Operator-provided extra_wordlists
+                #   3. Main wordlist (rockyou or operator override)
+                # The OUI list is generated fresh per handshake and deleted
+                # after the attempt so we never leave temp files around.
+                from core.oui_wordlist import generate_oui_wordlist
+                oui_path = generate_oui_wordlist(
+                    handshake.get('bssid', ''),
+                    handshake.get('ssid', ''),
+                )
+                oui_wls = [oui_path] if oui_path else []
+                all_wordlists = oui_wls + self.extra_wordlists + [self.wordlist]
                 cracked = False
                 for wordlist in all_wordlists:
                     if not os.path.exists(wordlist):
@@ -256,6 +266,13 @@ class PasswordCracker:
                     if cracked:
                         break
                 
+                # Clean up OUI temp file.
+                if oui_path and os.path.isfile(oui_path):
+                    try:
+                        os.unlink(oui_path)
+                    except OSError:
+                        pass
+
                 # Update status
                 if cracked:
                     self.db.update_handshake_status(handshake_id, 'cracked')
