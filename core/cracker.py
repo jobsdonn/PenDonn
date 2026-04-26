@@ -1,9 +1,15 @@
 """
 PenDonn Password Cracking Module
-Handles password cracking using John the Ripper and Hashcat
+Handles password cracking using aircrack-ng, John the Ripper, and Hashcat.
+
+Accepts both legacy `.cap` files (airodump-era) and modern `.pcapng` files
+(hcxdumptool-era). The capture path is now hcxdumptool-only, so all new
+captures are .pcapng — but we keep .cap support for any operator-provided
+or pre-existing files.
 """
 
 import os
+import re
 import time
 import subprocess
 import threading
@@ -13,6 +19,17 @@ from datetime import datetime
 from typing import Dict, Optional, List
 
 logger = logging.getLogger(__name__)
+
+
+def _hashfile_for(capture_file: str) -> str:
+    """Return the hashcat-22000 path for a given capture file.
+
+    Handles both .cap and .pcapng inputs by replacing the trailing
+    extension. The previous `capture_file.replace('.cap', '.22000')`
+    would silently no-op on .pcapng inputs, leaving cracker stuck in a
+    loop trying to convert a file it had already named wrong.
+    """
+    return re.sub(r"\.(cap|pcapng|pcap)$", ".22000", capture_file)
 
 
 class PasswordCracker:
@@ -240,26 +257,36 @@ class PasswordCracker:
                 time.sleep(1)
     
     def _crack_with_john(self, handshake: Dict) -> Optional[tuple]:
-        """Crack password using John the Ripper"""
+        """Crack password using John the Ripper.
+
+        John uses `wpapcap2john` to convert capture → john format. On
+        most john-jumbo builds wpapcap2john only handles classic .cap;
+        skip .pcapng inputs and let aircrack-ng/hashcat handle those.
+        """
         try:
             handshake_id = handshake['id']
             capture_file = handshake['file_path']
-            
+
+            # Skip john for pcapng — wpapcap2john doesn't read it.
+            if capture_file.lower().endswith(('.pcapng', '.pcap')):
+                logger.debug(f"Skipping john for {capture_file} — wpapcap2john requires .cap")
+                return None
+
             # Wait a bit and verify file exists and has content
             for i in range(10):  # Try for up to 10 seconds
                 if os.path.exists(capture_file) and os.path.getsize(capture_file) > 1000:
                     break
                 logger.debug(f"Waiting for capture file {capture_file} to be ready...")
                 time.sleep(1)
-            
+
             if not os.path.exists(capture_file):
                 logger.error(f"Capture file not found: {capture_file}")
                 return None
-            
+
             if os.path.getsize(capture_file) < 1000:
                 logger.error(f"Capture file too small: {capture_file} ({os.path.getsize(capture_file)} bytes)")
                 return None
-            
+
             logger.info(f"Cracking with John the Ripper: {handshake['ssid']}")
             
             # John can't read hashcat 22000 format directly
@@ -400,9 +427,10 @@ class PasswordCracker:
                 return None
             
             logger.info(f"Cracking with Hashcat: {ssid}")
-            
-            # Convert to hashcat 22000 format
-            hash_file = capture_file.replace('.cap', '.22000')
+
+            # Convert capture to hashcat 22000 format. Handles .cap AND
+            # .pcapng (the latter is what hcxdumptool produces post-2026-04-26).
+            hash_file = _hashfile_for(capture_file)
             
             if not os.path.exists(hash_file):
                 try:
@@ -546,17 +574,37 @@ class PasswordCracker:
             
             logger.info(f"Cracking with aircrack-ng: {ssid}")
 
+            # aircrack-ng on this Pi (1.7) cannot read hcxdumptool's pcapng
+            # directly (link-type IEEE802_11_RADIO). Convert to legacy pcap
+            # via tcpdump first; tcpdump handles the radiotap encapsulation.
+            crack_input = capture_file
+            converted_cap = None
+            if capture_file.lower().endswith(('.pcapng', '.pcap')):
+                converted_cap = re.sub(r"\.(pcapng|pcap)$", "_aircrack.cap", capture_file)
+                try:
+                    conv = subprocess.run(
+                        ['tcpdump', '-r', capture_file, '-w', converted_cap],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    if conv.returncode == 0 and os.path.exists(converted_cap):
+                        crack_input = converted_cap
+                        logger.info(f"Converted {os.path.basename(capture_file)} → .cap for aircrack-ng")
+                    else:
+                        logger.warning(f"tcpdump conversion failed: {conv.stderr.strip()[:200]} — trying pcapng directly")
+                        converted_cap = None
+                except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+                    logger.warning(f"tcpdump not available: {e} — trying pcapng directly")
+                    converted_cap = None
+
             # Run aircrack-ng
             start_time = time.time()
 
-            # Was: '-l /tmp/cracked_{id}.txt' — wrote cracked PSK to a
-            # world-readable file. Use the per-process secure temp dir instead.
             from .secure_io import secure_temp_config
             cracked_out = secure_temp_config(f"cracked_{handshake_id}", suffix=".txt")
 
             cmd = [
                 'aircrack-ng',
-                capture_file,
+                crack_input,
                 '-w', self.wordlist,
                 '-b', bssid,  # Specify BSSID to avoid interactive prompt
                 '-l', cracked_out,  # Output file for password (0600 in secure dir)
@@ -577,43 +625,44 @@ class PasswordCracker:
             stdout, stderr = process.communicate(timeout=3600)  # 1 hour timeout
             
             crack_time = time.time() - start_time
-            
-            # Log aircrack-ng's output for debugging
+
             if stdout:
                 logger.info(f"aircrack-ng stdout: {stdout[:1000]}")
             if stderr:
                 logger.info(f"aircrack-ng stderr: {stderr[:1000]}")
-            
             logger.info(f"aircrack-ng exit code: {process.returncode}")
-            
-            # Check output file first
-            output_file = f'/tmp/cracked_{handshake_id}.txt'
-            if os.path.exists(output_file):
-                with open(output_file, 'r') as f:
+
+            # Clean up converted pcap if we made one.
+            if converted_cap and os.path.exists(converted_cap):
+                try:
+                    os.remove(converted_cap)
+                except OSError:
+                    pass
+
+            # Check the -l output file (cracked_out) first.
+            if os.path.exists(cracked_out):
+                with open(cracked_out, 'r') as f:
                     password = f.read().strip()
-                    if password:
-                        logger.info(f"aircrack-ng found password: {password}")
-                        os.remove(output_file)  # Clean up
-                        return (password, crack_time)
-            
-            # Also check stdout for "KEY FOUND" message
+                if password:
+                    logger.info(f"aircrack-ng found password: {password}")
+                    try:
+                        os.remove(cracked_out)
+                    except OSError:
+                        pass
+                    return (password, crack_time)
+
+            # Fallback: parse "KEY FOUND! [ password ]" from stdout.
             if 'KEY FOUND!' in stdout:
-                # Extract password from output
-                # Format: KEY FOUND! [ password ]
                 for line in stdout.split('\n'):
-                    if 'KEY FOUND!' in line:
-                        # Extract password between brackets
-                        if '[' in line and ']' in line:
-                            start = line.index('[') + 1
-                            end = line.index(']')
-                            password = line[start:end].strip()
-                            if password:
-                                logger.info(f"aircrack-ng found password in output: {password}")
-                                return (password, crack_time)
-            
+                    if 'KEY FOUND!' in line and '[' in line and ']' in line:
+                        password = line[line.index('[') + 1:line.index(']')].strip()
+                        if password:
+                            logger.info(f"aircrack-ng found password in stdout: {password}")
+                            return (password, crack_time)
+
             logger.info(f"aircrack-ng did not find password for {ssid}")
             return None
-        
+
         except subprocess.TimeoutExpired:
             logger.warning(f"aircrack-ng timeout for {handshake['ssid']}")
             if 'process' in self.active_cracks.get(handshake_id, {}):

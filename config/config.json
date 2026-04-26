@@ -26,7 +26,8 @@
   },
   "cracking": {
     "enabled": true,
-    "engines": ["hashcat", "john"],
+    "engines": ["aircrack-ng", "hashcat", "john"],
+    "_engines_comment": "Tried in order. aircrack-ng first because it works on .cap directly (no conversion) and doesn't need OpenCL — important on RPi where hashcat 6.2.6 + PoCL segfaults on ARM64. Hashcat second for x86 hosts with GPUs. John third as last resort.",
     "wordlist_path": "/usr/share/wordlists/rockyou.txt",
     "auto_start_cracking": true,
     "max_concurrent_cracks": 2,
