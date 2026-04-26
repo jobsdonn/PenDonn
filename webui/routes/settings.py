@@ -75,20 +75,22 @@ def _safety_status(config: Dict[str, Any]) -> Dict[str, Any]:
 def settings_page(request: Request, username: str = Depends(require_login)):
     cfg = request.app.state.config
     al = cfg.get("allowlist", {}) or {}
+    ctx = {
+        "username": username,
+        "active_nav": "settings",
+        "config_redacted": _redact(cfg),
+        "config_json": json.dumps(_redact(cfg), indent=2, sort_keys=True),
+        "allowlist": list(al.get("ssids") or []),
+        "allowlist_strict": bool(al.get("strict", True)),
+        "safety": _safety_status(cfg),
+        "config_path": request.app.state.config_path,
+        "overlay_path": local_overlay_path(request.app.state.config_path),
+        "overlay_exists": os.path.isfile(local_overlay_path(request.app.state.config_path)),
+    }
+    # Scope partial needs its own context keys (active, confirmed, missing_ssids, ...)
+    ctx.update(_scope_status(request))
     return request.app.state.templates.TemplateResponse(
-        request,
-        "settings.html",
-        {
-                       "username": username,
-            "active_nav": "settings",
-            "config_redacted": _redact(cfg),
-            "config_json": json.dumps(_redact(cfg), indent=2, sort_keys=True),
-            "allowlist": list(al.get("ssids") or []),
-            "allowlist_strict": bool(al.get("strict", True)),
-            "safety": _safety_status(cfg),
-            "config_path": request.app.state.config_path,
-            "overlay_path": local_overlay_path(request.app.state.config_path),
-            "overlay_exists": os.path.isfile(local_overlay_path(request.app.state.config_path)),},
+        request, "settings.html", ctx,
     )
 
 
@@ -227,4 +229,73 @@ def allowlist_strict_toggle(
         request,
         "partials/allowlist.html",
         {"request": request, "allowlist": current, "allowlist_strict": new_strict,},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight scope authorization
+#
+# A confirmed scope is a human-stamped receipt: "I, the operator, have
+# written authorization to attack these SSIDs." It sits between the
+# allowlist (which says *what* would be attacked) and the daemon (which
+# refuses to attack until the scope is confirmed).
+#
+# Re-confirm whenever the allowlist gains a new SSID; shrinking the
+# allowlist does NOT invalidate existing confirmation.
+# ---------------------------------------------------------------------------
+
+
+def _scope_status(request: Request) -> Dict[str, Any]:
+    """Build the partial's view of the current scope-confirmation state."""
+    db = request.app.state.db
+    cfg = request.app.state.config
+    allowlist = _current_allowlist(cfg)
+    active = db.get_active_scope()
+    confirmed, missing = db.is_scope_confirmed_for(allowlist)
+    return {
+        "allowlist": allowlist,
+        "allowlist_empty": not allowlist,
+        "active": active,
+        "confirmed": confirmed,
+        "missing_ssids": missing,
+    }
+
+
+@router.get("/partials/scope")
+def scope_partial(request: Request, username: str = Depends(require_login)):
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "partials/scope.html",
+        _scope_status(request),
+    )
+
+
+@router.post("/partials/scope/confirm")
+def scope_confirm(
+    request: Request,
+    note: str = Form(""),
+    username: str = Depends(require_login),
+):
+    cfg = request.app.state.config
+    allowlist = _current_allowlist(cfg)
+    if not allowlist:
+        # Nothing to confirm — but don't 4xx; just re-render with empty state.
+        return request.app.state.templates.TemplateResponse(
+            request, "partials/scope.html", _scope_status(request),
+        )
+    request.app.state.db.confirm_scope(
+        ssids=allowlist,
+        confirmed_by=username,
+        note=(note or None),
+    )
+    return request.app.state.templates.TemplateResponse(
+        request, "partials/scope.html", _scope_status(request),
+    )
+
+
+@router.post("/partials/scope/revoke")
+def scope_revoke(request: Request, username: str = Depends(require_login)):
+    request.app.state.db.revoke_scope(revoked_by=username)
+    return request.app.state.templates.TemplateResponse(
+        request, "partials/scope.html", _scope_status(request),
     )

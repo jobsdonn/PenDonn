@@ -149,7 +149,24 @@ class Database:
                     message TEXT
                 )
             ''')
-            
+
+            # Scope authorizations: each row is a human "I confirm we have
+            # written authorization to attack these SSIDs" gate. Latest row
+            # is the authoritative receipt. Daemon refuses to attack any
+            # SSID not present in the latest row's ssids_json.
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS scope_authorizations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    confirmed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    confirmed_by TEXT,
+                    ssids_json TEXT NOT NULL,
+                    note TEXT,
+                    revoked INTEGER DEFAULT 0,
+                    revoked_at TIMESTAMP,
+                    revoked_by TEXT
+                )
+            ''')
+
             conn.commit()
             # Don't close the connection - let it stay open for thread-local use
             # conn.close()
@@ -409,6 +426,93 @@ class Database:
         
         vulns = [dict(row) for row in cursor.fetchall()]
         return vulns
+
+    # ----- Scope authorization -----
+    #
+    # The "scope authorization" gate sits between the allowlist and the
+    # actual attack code. The allowlist alone says *which SSIDs are
+    # configured as in-scope*; the scope authorization says *a human
+    # confirmed in the UI that those SSIDs are authorized to attack right
+    # now*. Daemon refuses handshake/deauth attacks against any SSID not
+    # covered by the latest non-revoked scope_authorizations row.
+
+    def confirm_scope(self, ssids: List[str], confirmed_by: str,
+                      note: Optional[str] = None) -> int:
+        """Record an operator's confirmation that the given SSIDs are
+        authorized to attack. Returns the new row id."""
+        with self._lock:
+            conn = self.connect()
+            cursor = conn.cursor()
+            cursor.execute(
+                'INSERT INTO scope_authorizations (confirmed_by, ssids_json, note) VALUES (?, ?, ?)',
+                (confirmed_by, json.dumps(sorted(set(ssids))), note),
+            )
+            row_id = cursor.lastrowid
+            conn.commit()
+            logger.info(f"Scope confirmed by {confirmed_by} for {len(ssids)} SSID(s)")
+            return row_id
+
+    def revoke_scope(self, revoked_by: str) -> bool:
+        """Revoke the latest active scope authorization. Returns True if a
+        row was actually revoked, False if there was nothing to revoke."""
+        with self._lock:
+            conn = self.connect()
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT id FROM scope_authorizations WHERE revoked = 0 ORDER BY id DESC LIMIT 1'
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+            cursor.execute(
+                'UPDATE scope_authorizations SET revoked = 1, '
+                'revoked_at = CURRENT_TIMESTAMP, revoked_by = ? WHERE id = ?',
+                (revoked_by, row['id']),
+            )
+            conn.commit()
+            logger.info(f"Scope authorization {row['id']} revoked by {revoked_by}")
+            return True
+
+    def get_active_scope(self) -> Optional[Dict]:
+        """Return the latest non-revoked scope authorization, or None.
+
+        The shape includes a parsed ssids list (not the raw JSON), so
+        callers can compare directly against the configured allowlist."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT * FROM scope_authorizations WHERE revoked = 0 '
+            'ORDER BY id DESC LIMIT 1'
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d['ssids'] = json.loads(d['ssids_json']) if d.get('ssids_json') else []
+        except (TypeError, ValueError):
+            d['ssids'] = []
+        return d
+
+    def is_scope_confirmed_for(self, allowlist_ssids: List[str]) -> Tuple[bool, List[str]]:
+        """Check whether the given allowlist is fully covered by the latest
+        scope authorization.
+
+        Returns a (confirmed, missing) pair:
+          - confirmed=True  -> every SSID in allowlist is in the active scope
+          - confirmed=False -> missing[] holds the SSIDs that are not yet
+            authorized; UI should prompt operator to re-confirm.
+        Empty allowlist trivially counts as confirmed (nothing to attack).
+        """
+        wanted = sorted(set(allowlist_ssids))
+        if not wanted:
+            return (True, [])
+        active = self.get_active_scope()
+        if not active:
+            return (False, wanted)
+        confirmed_set = set(active.get('ssids') or [])
+        missing = [s for s in wanted if s not in confirmed_set]
+        return (not missing, missing)
 
     # System logs
     def add_log(self, module: str, message: str, level: str = "INFO") -> int:

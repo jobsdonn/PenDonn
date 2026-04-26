@@ -29,6 +29,23 @@
         </div>
     </section>
 
+    <!-- Pre-flight scope authorization. The daemon refuses to attack
+         any allowlisted SSID until a human confirms the scope here.
+         Re-confirm whenever the allowlist gains a new SSID. -->
+    <section class="lg:col-span-2 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
+        <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
+            <h2 class="font-semibold">Scope authorization</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Operator attestation that you have written authorization to attack
+                the allowlisted SSIDs right now. The daemon will not start any
+                handshake capture or deauth until this is confirmed.
+            </p>
+        </header>
+        <div class="p-5">
+            {% include "partials/scope.html" %}
+        </div>
+    </section>
+
     <!-- Safety status -->
     <section class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
         <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">

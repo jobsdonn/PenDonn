@@ -76,6 +76,11 @@ class WiFiScanner:
         # Enumeration coordination
         self.enumeration_active = False  # Flag to pause new captures during enumeration
         self.enumeration_lock = threading.Lock()  # Lock for safe pause/resume
+
+        # Pre-flight scope authorization tracking. Logged-once-per-SSID set
+        # avoids spamming the journal when the same un-confirmed SSID keeps
+        # showing up across scan rounds.
+        self._scope_warned: set = set()
         
         # Loud, explicit logging about the targeting policy. The previous
         # message ("Whitelist EMPTY - will attack ALL networks!") was easy
@@ -508,15 +513,33 @@ class WiFiScanner:
                             continue
                         
                         # Targeting decision (Phase 2A semantics):
-                        #   strict=True  + ssid in allowlist → attack
+                        #   strict=True  + ssid in allowlist → attack (if scope-confirmed)
                         #   strict=True  + ssid NOT in list  → skip (safe default)
                         #   strict=False                     → attack regardless
                         #     (preflight has already required armed_override
                         #      for the strict=False case, so reaching this
                         #      branch with strict=False is operator-authorized)
+                        #
+                        # Pre-flight scope authorization gate (Phase 4):
+                        # Even with strict allowlist + SSID-in-list, refuse
+                        # to attack until a human has explicitly confirmed
+                        # the scope in the UI. Empty allowlist is trivially
+                        # confirmed (passive only). strict=false bypasses
+                        # this gate (armed_override already covers that
+                        # power-user path). When unconfirmed, log once per
+                        # SSID and skip — passive scan still proceeds.
                         if (not self.allowlist_strict) or (essid in self.allowlist_ssids):
-                            # Store for prioritization (will be handled after parsing ALL networks)
-                            self.networks[bssid]['capture_candidate'] = True
+                            if self.allowlist_strict and not self._scope_allows(essid):
+                                if essid not in self._scope_warned:
+                                    logger.warning(
+                                        f"Scope not confirmed for {essid} — "
+                                        f"refusing to attack. Confirm authorization "
+                                        f"in the web UI (Settings → Scope authorization)."
+                                    )
+                                    self._scope_warned.add(essid)
+                            else:
+                                # Store for prioritization (handled after parsing ALL networks)
+                                self.networks[bssid]['capture_candidate'] = True
                         else:
                             logger.debug(f"Network {essid} discovered but not attacking - not in whitelist")
                 
@@ -531,7 +554,23 @@ class WiFiScanner:
         
         except Exception as e:
             logger.error(f"Failed to parse scan results: {e}")
-    
+
+    def _scope_allows(self, ssid: str) -> bool:
+        """True if the operator has confirmed in the UI that we're authorized
+        to attack `ssid` right now. Empty allowlist short-circuits to True
+        (passive-only mode — there's no attack target to gate)."""
+        if not self.allowlist_ssids:
+            return True
+        try:
+            active = self.db.get_active_scope()
+        except Exception as e:
+            # DB unavailable → safer to deny than open the gate.
+            logger.warning(f"Could not read scope authorization, denying attack on {ssid}: {e}")
+            return False
+        if not active:
+            return False
+        return ssid in set(active.get('ssids') or [])
+
     def _parse_clients_and_prioritize(self, sections: List[str], csv_file: str):
         """Parse client section and start capture for network with most clients"""
         try:

@@ -17,13 +17,20 @@ def dashboard(request: Request, username: str = Depends(require_login)):
     """Main landing page. Renders the shell; partials are loaded via HTMX."""
     db = request.app.state.db
     stats = db.get_statistics()
+    cfg = request.app.state.config
+    allowlist = list((cfg.get("allowlist", {}) or {}).get("ssids") or [])
+    confirmed, missing = db.is_scope_confirmed_for(allowlist)
     return request.app.state.templates.TemplateResponse(
         request,
         "dashboard.html",
         {
-                       "username": username,
+            "username": username,
             "active_nav": "dashboard",
-            "stats": stats,},
+            "stats": stats,
+            "scope_confirmed": confirmed,
+            "scope_missing_ssids": missing,
+            "scope_has_targets": bool(allowlist),
+        },
     )
 
 

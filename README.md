@@ -164,11 +164,23 @@ For sensitive engagements, run a self-hosted ntfy server with auth (`server: "ht
 
 ## Safety model
 
-There is one principle: **never lock yourself out of SSH**.
+There are two principles:
+
+### 1. Never lock yourself out of SSH
 
 - Every iface mode change goes through `SSHGuard.assert_safe_to_modify()` — refuses to touch the management iface or the iface SSH currently rides
 - A boot-time `Preflight` aborts daemon startup if config would lead to lockout (e.g. `strict=false` without `armed_override`)
 - A `pendonn-watchdog` systemd unit runs `scripts/recovery-watchdog.sh` independently — flips management iface back from monitor → managed every 30s if anything escapes the first two layers
+
+### 2. Never attack a network you haven't been authorized to test
+
+- The `allowlist` defines *which* SSIDs are in scope (config-level)
+- A separate **scope authorization** receipt sits between the allowlist and the daemon (operational-level): the daemon refuses to capture handshakes or deauth until a human has explicitly clicked "Confirm scope" in the web UI on **Settings → Scope authorization**, attesting they have written authorization
+- The receipt is per-SSID-set: shrinking the allowlist stays confirmed; adding a new SSID requires re-confirmation
+- A banner on the dashboard makes the unconfirmed state impossible to miss
+- All confirmations are timestamped + tagged with the WebUI username for audit trail
+
+This means: even with the allowlist populated, a fresh install / restored backup / new SSID is **passive-only** until a human says "yes, go".
 
 Read [docs/SAFETY.md](docs/SAFETY.md) before changing the `safety:` config section.
 
@@ -188,7 +200,7 @@ pendonn/
 │   ├── config.json                 # tracked defaults
 │   ├── config.example.json         # annotated reference
 │   └── config.rpi_zero2w.json      # single-radio variant
-├── tests/            # 137 unit tests, run with: python -m unittest discover tests
+├── tests/            # 152 unit tests, run with: python -m unittest discover tests
 ├── docs/
 │   ├── SAFETY.md                   # SSH lockout + plugin loader trust model
 │   └── DISPLAY_SETUP.md            # Waveshare wiring + library install
@@ -204,7 +216,7 @@ pendonn/
 python -m venv venv
 . venv/bin/activate                 # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-python -m unittest discover tests   # 137 tests, ~7s on a laptop
+python -m unittest discover tests   # 152 tests, ~7s on a laptop
 ```
 
 POSIX-only tests (e.g. `/proc` walking) are skipped on Windows. The web UI runs locally:

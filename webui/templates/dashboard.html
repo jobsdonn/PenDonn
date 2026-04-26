@@ -4,6 +4,32 @@
 
 {% block content %}
 <div class="space-y-6">
+    {# Scope authorization banner — shown only when allowlist has SSIDs
+       but the operator has not yet confirmed authorization. Daemon will
+       refuse to attack until this is cleared. #}
+    {% if scope_has_targets and not scope_confirmed %}
+    <div class="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30 px-4 py-3 flex items-start gap-3">
+        <svg class="w-5 h-5 mt-0.5 text-amber-600 dark:text-amber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 9v3m0 4h.01M10.29 3.86l-8.18 14.18A2 2 0 003.83 21h16.34a2 2 0 001.72-2.96L13.71 3.86a2 2 0 00-3.42 0z" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium text-amber-800 dark:text-amber-200">
+                Attacks paused — scope authorization required
+            </div>
+            <div class="text-xs text-slate-700 dark:text-slate-300 mt-0.5">
+                {{ scope_missing_ssids|length }} SSID{{ 's' if scope_missing_ssids|length != 1 }}
+                in your allowlist are not authorized:
+                <span class="font-mono">{{ scope_missing_ssids|join(', ') }}</span>.
+                Daemon will only passively scan until you confirm.
+            </div>
+        </div>
+        <a href="/settings#scope"
+           class="shrink-0 px-3 py-1 rounded text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600">
+            Confirm scope →
+        </a>
+    </div>
+    {% endif %}
+
     {# KPI tiles. Polled by HTMX every 5s; only this fragment repaints. #}
     <div id="stats"
          hx-get="/partials/stats"
