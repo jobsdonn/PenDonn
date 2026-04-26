@@ -46,7 +46,11 @@ class PasswordCracker:
         self.wordlist = config['cracking']['wordlist_path']
         self.auto_start = config['cracking']['auto_start_cracking']
         self.max_concurrent = config['cracking']['max_concurrent_cracks']
-        
+        self.extra_wordlists = [
+            w for w in config['cracking'].get('extra_wordlists', [])
+            if w and os.path.exists(w)
+        ]
+
         self.john_format = config['cracking']['john_format']
         
         self.running = False
@@ -210,39 +214,40 @@ class PasswordCracker:
                     self.crack_queue.task_done()
                     break
                 
-                # Try each enabled cracking engine
+                # Try each wordlist (extras first — usually small/targeted)
+                # then each engine per wordlist
+                all_wordlists = self.extra_wordlists + [self.wordlist]
                 cracked = False
-                for engine in self.engines:
-                    logger.info(f"Attempting to crack with engine: {engine}")
-                    if engine == 'cowpatty':
-                        result = self._crack_with_cowpatty(handshake)
-                    elif engine == 'john':
-                        result = self._crack_with_john(handshake)
-                    elif engine == 'aircrack-ng':
-                        result = self._crack_with_aircrack(handshake)
-                    else:
-                        logger.warning(f"Unknown cracking engine: {engine}")
+                for wordlist in all_wordlists:
+                    if not os.path.exists(wordlist):
+                        logger.warning(f"Wordlist not found, skipping: {wordlist}")
                         continue
-                    
-                    if result:
-                        cracked = True
-                        password, crack_time = result
-                        
-                        # Store cracked password
-                        self.db.add_cracked_password(
-                            handshake_id=handshake_id,
-                            ssid=handshake['ssid'],
-                            bssid=handshake['bssid'],
-                            password=password,
-                            engine=engine,
-                            crack_time=int(crack_time)
-                        )
-                        
-                        logger.info(f"Password cracked for {handshake['ssid']}: {password}")
-                        
-                        # Note: We don't forcibly stop active captures as it may kill shared processes
-                        # Instead, the wifi_scanner will naturally skip this network on next scan cycle
-                        
+                    for engine in self.engines:
+                        logger.info(f"Attempting {engine} with {wordlist}")
+                        if engine == 'cowpatty':
+                            result = self._crack_with_cowpatty(handshake, wordlist)
+                        elif engine == 'john':
+                            result = self._crack_with_john(handshake, wordlist)
+                        elif engine == 'aircrack-ng':
+                            result = self._crack_with_aircrack(handshake, wordlist)
+                        else:
+                            logger.warning(f"Unknown cracking engine: {engine}")
+                            continue
+
+                        if result:
+                            cracked = True
+                            password, crack_time = result
+                            self.db.add_cracked_password(
+                                handshake_id=handshake_id,
+                                ssid=handshake['ssid'],
+                                bssid=handshake['bssid'],
+                                password=password,
+                                engine=engine,
+                                crack_time=int(crack_time)
+                            )
+                            logger.info(f"Password cracked for {handshake['ssid']}: {password}")
+                            break
+                    if cracked:
                         break
                 
                 # Update status
@@ -263,7 +268,7 @@ class PasswordCracker:
                 logger.error(f"Worker {worker_id} error: {e}", exc_info=True)
                 time.sleep(1)
     
-    def _crack_with_cowpatty(self, handshake: Dict) -> Optional[tuple]:
+    def _crack_with_cowpatty(self, handshake: Dict, wordlist: str = None) -> Optional[tuple]:
         """Crack WPA2 handshake using cowpatty.
 
         cowpatty reads .pcapng/.cap natively, computes PBKDF2-SHA1 in C, and
@@ -283,16 +288,17 @@ class PasswordCracker:
                 return None
 
             # cowpatty must have a wordlist
-            if not os.path.exists(self.wordlist):
-                logger.warning(f"cowpatty: wordlist not found: {self.wordlist}")
+            wordlist = wordlist or self.wordlist
+            if not os.path.exists(wordlist):
+                logger.warning(f"cowpatty: wordlist not found: {wordlist}")
                 return None
 
-            logger.info(f"cowpatty: cracking {ssid} with {self.wordlist}")
+            logger.info(f"cowpatty: cracking {ssid} with {wordlist}")
             start_time = time.time()
 
             cmd = [
                 'cowpatty',
-                '-f', self.wordlist,
+                '-f', wordlist,
                 '-r', capture_file,
                 '-s', ssid,
             ]
@@ -329,7 +335,7 @@ class PasswordCracker:
             logger.error(f"cowpatty error: {e}", exc_info=True)
             return None
 
-    def _crack_with_john(self, handshake: Dict) -> Optional[tuple]:
+    def _crack_with_john(self, handshake: Dict, wordlist: str = None) -> Optional[tuple]:
         """Crack password using John the Ripper.
 
         John uses `wpapcap2john` to convert capture → john format. On
@@ -404,7 +410,7 @@ class PasswordCracker:
             for john_format in formats_to_try:
                 cmd = [
                     'john',
-                    '--wordlist=' + self.wordlist,
+                    '--wordlist=' + (wordlist or self.wordlist),
                     f'--format={john_format}',
                     john_hash_file
                 ]
@@ -470,7 +476,7 @@ class PasswordCracker:
             logger.error(f"John the Ripper error: {e}")
             return None
     
-    def _crack_with_aircrack(self, handshake: Dict) -> Optional[tuple]:
+    def _crack_with_aircrack(self, handshake: Dict, wordlist: str = None) -> Optional[tuple]:
         """Crack password using aircrack-ng (most reliable on Raspberry Pi)"""
         try:
             handshake_id = handshake['id']
@@ -526,7 +532,7 @@ class PasswordCracker:
             cmd = [
                 'aircrack-ng',
                 crack_input,
-                '-w', self.wordlist,
+                '-w', wordlist or self.wordlist,
                 '-b', bssid,  # Specify BSSID to avoid interactive prompt
                 '-l', cracked_out,  # Output file for password (0600 in secure dir)
             ]
