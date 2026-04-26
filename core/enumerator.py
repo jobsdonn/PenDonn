@@ -127,7 +127,7 @@ class NetworkEnumerator:
                         # Check if already scanned in database
                         existing_scans = self.db.get_scans(network_id=None)
                         already_scanned = any(
-                            s['ssid'] == entry['ssid'] and s['status'] in ('completed', 'running')
+                            s['ssid'] == entry['ssid'] and s['status'] in ('completed', 'running', 'failed')
                             for s in existing_scans
                         )
                         

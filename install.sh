@@ -175,7 +175,6 @@ apt-get install -y \
             aircrack-ng \
             cowpatty \
             john \
-            hashcat \
             nmap \
             tcpdump \
             smbclient \
@@ -977,21 +976,17 @@ print(f'Auth configured: user={user}, password hashed and stored')
         echo -e "${GREEN}Auto-cracking enabled${NC}"
     fi
     
-    # Write to .local; also set platform-aware engine order (ARM64 = aircrack-ng first)
+    # Write to .local
     $INSTALL_DIR/venv/bin/python3 -c "
-import json, os, platform
+import json, os
 local = '$LOCAL_FILE'
 overlay = json.load(open(local)) if os.path.isfile(local) else {}
 overlay.setdefault('cracking', {})
 overlay['cracking']['auto_start_cracking'] = $AUTO_CRACK_VALUE
-# On ARM64 (RPi4), hashcat+PoCL segfaults — keep aircrack-ng first
-machine = platform.machine().lower()
-if machine in ('aarch64', 'armv7l', 'arm'):
-    overlay['cracking']['engines'] = ['aircrack-ng', 'hashcat', 'john']
 with open(local, 'w') as f:
     json.dump(overlay, f, indent=2)
 os.chmod(local, 0o600)
-print('Local config updated: auto_start_cracking = ' + str($AUTO_CRACK_VALUE) + ', arch=' + machine)
+print('Local config updated: auto_start_cracking = ' + str($AUTO_CRACK_VALUE))
 "
     
     echo ""

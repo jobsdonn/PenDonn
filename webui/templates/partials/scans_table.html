@@ -12,11 +12,12 @@
                 <th class="px-4 py-3 font-medium text-right">Findings</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-slate-200 dark:divide-ink-700">
-            {% for s in scans %}
-            <tr x-data="{ open: false, loaded: false, detail: '' }" class="hover:bg-slate-50 dark:hover:bg-ink-800/40 transition">
+        {% for s in scans %}
+        <tbody x-data="{ open: false, loaded: false, detail: '' }"
+               x-effect="open ? $el.setAttribute('data-expanded','') : $el.removeAttribute('data-expanded')">
+            <tr class="hover:bg-slate-50 dark:hover:bg-ink-800/40 transition{% if not loop.first %} border-t border-slate-200 dark:border-ink-700{% endif %}">
                 <td class="px-2 pl-4 py-2.5 text-slate-400">
-                    <button @click="open = !open; if (open && !loaded) { fetch('/scans/{{ s.id }}').then(r => r.text()).then(t => { detail = t; loaded = true; }) }"
+                    <button @click="open = !open; if (open && !loaded) { fetch('/scans/{{ s.id }}').then(r => r.ok ? r.text() : Promise.reject(r.status)).then(t => { detail = t; loaded = true; }).catch(() => { detail = '<p class=\'text-xs text-rose-500 dark:text-rose-400 italic\'>Could not load scan detail.</p>'; loaded = true; }) }"
                             class="p-1 rounded hover:bg-slate-100 dark:hover:bg-ink-800">
                         <svg class="w-4 h-4 transition-transform" :class="open ? 'rotate-90' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
@@ -50,15 +51,15 @@
                     {% endif %}
                 </td>
             </tr>
-            <tr x-show="open" x-cloak class="bg-slate-50 dark:bg-ink-950/40">
+            <tr x-show="open" x-cloak class="bg-slate-50 dark:bg-ink-950/40 border-t border-slate-200 dark:border-ink-700">
                 <td></td>
                 <td colspan="5" class="px-4 py-4">
                     <div x-show="!loaded" class="text-xs text-slate-500 dark:text-slate-400">Loading…</div>
                     <div x-show="loaded" x-html="detail"></div>
                 </td>
             </tr>
-            {% endfor %}
         </tbody>
+        {% endfor %}
     </table>
 </div>
 <div class="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-ink-700">
