@@ -69,7 +69,16 @@ class PasswordCracker:
         
         logger.info("Starting password cracking service...")
         self.running = True
-        
+
+        # Any handshake left in 'cracking' status at startup means the previous
+        # run crashed mid-crack — reset to 'pending' so we retry.
+        try:
+            for h in self.db.get_all_handshakes(status='cracking'):
+                self.db.update_handshake_status(h['id'], 'pending')
+                logger.info(f"Reset orphaned 'cracking' handshake {h['id']} to pending")
+        except Exception as e:
+            logger.warning(f"Could not reset orphaned handshakes: {e}")
+
         # Start worker threads
         for i in range(self.max_concurrent):
             worker = threading.Thread(target=self._crack_worker, args=(i,), daemon=True)
@@ -198,10 +207,14 @@ class PasswordCracker:
                 
                 logger.info(f"Worker {worker_id} processing handshake {handshake_id}")
                 
-                # Update status
+                # Update status (use .get to guard stop() race clearing active_cracks)
                 self.db.update_handshake_status(handshake_id, 'cracking')
-                self.active_cracks[handshake_id]['status'] = 'cracking'
-                self.active_cracks[handshake_id]['start_time'] = time.time()
+                if handshake_id in self.active_cracks:
+                    self.active_cracks[handshake_id]['status'] = 'cracking'
+                    self.active_cracks[handshake_id]['start_time'] = time.time()
+                if not self.running:
+                    self.crack_queue.task_done()
+                    break
                 
                 # Try each enabled cracking engine
                 cracked = False
