@@ -189,5 +189,41 @@ class TestDeprecatedMethodsAreNoOp(unittest.TestCase):
             mock_sp.run.assert_not_called()
 
 
+class TestParseEncryption(unittest.TestCase):
+    """_parse_encryption correctly classifies WPA3, WPA2, WPA, WEP, Open."""
+
+    def _parse(self, privacy: str, auth: str = "", cipher: str = "") -> str:
+        s = _make_scanner()
+        s._parse_encryption = ws.WiFiScanner._parse_encryption.__get__(s, type(s))
+        row = {'Authentication': auth, 'Cipher': cipher}
+        return s._parse_encryption(privacy, row)
+
+    def test_wpa3_sae_auth(self):
+        self.assertEqual(self._parse("WPA3", "SAE"), "WPA3")
+
+    def test_wpa3_privacy_only(self):
+        self.assertEqual(self._parse("WPA3", ""), "WPA3")
+
+    def test_wpa3_transition_both_in_privacy(self):
+        result = self._parse("WPA2 WPA3", "PSK SAE")
+        self.assertIn("transition", result.lower())
+
+    def test_wpa3_transition_psk_sae_auth(self):
+        result = self._parse("WPA2", "PSK SAE")
+        self.assertIn("transition", result.lower())
+
+    def test_wpa2(self):
+        self.assertEqual(self._parse("WPA2", "PSK"), "WPA2")
+
+    def test_wpa(self):
+        self.assertEqual(self._parse("WPA", "PSK"), "WPA")
+
+    def test_open(self):
+        self.assertEqual(self._parse("OPN", ""), "Open")
+
+    def test_wep(self):
+        self.assertEqual(self._parse("WEP", ""), "WEP")
+
+
 if __name__ == '__main__':
     unittest.main()

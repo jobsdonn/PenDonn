@@ -16,6 +16,7 @@
     "single_interface_mode": false,
     "allow_management_wifi": false,
     "channel_hop_interval": 2,
+    "scan_window_seconds": 30,
     "handshake_timeout": 300,
     "_comment": "Interface names can swap on reboot — populate monitor_mac/attack_mac/management_mac for stable detection. management_interface MUST point to whichever iface carries SSH; safety preflight will refuse to start otherwise."
   },

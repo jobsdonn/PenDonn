@@ -367,9 +367,12 @@ class WiFiScanner:
                     self.interface
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                # Let it scan for 30 seconds (check enumeration flag every second).
+                # Let it scan for scan_window_seconds (check every second).
+                # Configurable via wifi.scan_window_seconds; default 30s.
                 # See SCAN_WINDOW comment above.
-                SCAN_WINDOW_SEC = 30
+                SCAN_WINDOW_SEC = int(
+                    self.config.get('wifi', {}).get('scan_window_seconds', 30)
+                )
                 for _ in range(SCAN_WINDOW_SEC):
                     time.sleep(1)
                     # If enumeration starts during scan, abort immediately
@@ -664,26 +667,36 @@ class WiFiScanner:
             logger.debug(f"Error parsing clients: {e}")
     
     def _parse_encryption(self, privacy: str, row: Dict) -> str:
-        """Parse encryption type from airodump output"""
-        # airodump Privacy column examples: "WPA2", "WPA", "WEP", "OPN"
-        # Authentication column has details: "PSK", "MGT", etc.
-        
+        """Parse encryption type from airodump output.
+
+        airodump Privacy column examples: "WPA3", "WPA2 WPA3", "WPA2", "WPA", "WEP", "OPN"
+        Authentication column: "SAE", "PSK SAE", "PSK", "MGT", etc.
+        WPA3-only uses SAE; transition mode (WPA2+WPA3) uses "PSK SAE" or appears as
+        "WPA2 WPA3" in the Privacy field.
+        """
         if not privacy or privacy == 'OPN':
             return "Open"
-        
-        auth = row.get('Authentication', '').strip()
-        cipher = row.get('Cipher', '').strip()
-        
-        if 'WPA2' in privacy:
+
+        auth = row.get('Authentication', '').strip().upper()
+        p = privacy.strip().upper()
+
+        # WPA3 detection: auth column has SAE, or Privacy field has WPA3.
+        if 'SAE' in auth:
+            if 'PSK' in auth or ('WPA2' in p and 'WPA3' in p):
+                return "WPA3 (transition)"
+            return "WPA3"
+        if 'WPA3' in p:
+            return "WPA3"
+
+        if 'WPA2' in p:
             return "WPA2"
-        elif 'WPA' in privacy:
+        if 'WPA' in p:
             if 'WPA2' in auth:
                 return "WPA/WPA2"
             return "WPA"
-        elif 'WEP' in privacy:
+        if 'WEP' in p:
             return "WEP"
-        else:
-            return privacy if privacy else "Unknown"
+        return privacy if privacy else "Unknown"
     
     def _cleanup_old_scans(self):
         """Remove old scan files, keep last 5"""
