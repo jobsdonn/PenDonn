@@ -106,6 +106,22 @@ if [ "$agreement" != "yes" ]; then
     exit 1
 fi
 
+echo ""
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${YELLOW}Before we start — plug in your USB WiFi adapters now.${NC}"
+echo ""
+echo "  PenDonn needs 3 WiFi interfaces:"
+echo "    1. Onboard WiFi  → management (keeps SSH alive)"
+echo "    2. USB adapter   → monitor mode (scans for networks)"
+echo "    3. USB adapter   → attack mode (captures handshakes)"
+echo ""
+echo "  The drivers will be installed in a moment. Once loaded, the"
+echo "  adapters will be detected automatically. If they still don't"
+echo "  appear, the wizard will let you plug them in and retry."
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+read -p "USB adapters plugged in? Press Enter to continue..."
+
 # Update system
 print_status "Updating system packages..."
 apt-get update -qq
@@ -1223,9 +1239,9 @@ import json
 with open('$INSTALL_DIR/config/config.json.local') as f:
     json.load(f)
 " 2>/dev/null && _smoke_ok "config.json.local is valid JSON" \
-    || _smoke_err "config.json.local is INVALID JSON — wizard write may have failed"
+    || _smoke_err "config.json.local is INVALID JSON — check for syntax errors"
 else
-    _smoke_err "config.json.local not found — wizard may not have run or write failed"
+    _smoke_err "config.json.local not found — re-run installer to complete setup: sudo bash $SCRIPT_DIR/install.sh"
 fi
 
 # hcxdumptool
