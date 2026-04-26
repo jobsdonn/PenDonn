@@ -23,6 +23,7 @@ WorkingDirectory=${INSTALL_DIR}
 ExecStart=${INSTALL_DIR}/venv/bin/python ${INSTALL_DIR}/main.py
 Restart=always
 RestartSec=10
+TimeoutStopSec=35
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=pendonn

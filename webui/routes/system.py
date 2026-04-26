@@ -430,7 +430,7 @@ def reset_database(
                          capture_output=True, text=True)
             daemon_was_running = r.returncode == 0
             if daemon_was_running:
-                _sub.run(["systemctl", "stop", "pendonn"], timeout=15, check=True)
+                _sub.run(["systemctl", "stop", "pendonn"], timeout=40, check=True)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"could not stop daemon: {e}")
 
