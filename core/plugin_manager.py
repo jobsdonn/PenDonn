@@ -186,7 +186,17 @@ class PluginManager:
             with open(config_file, 'r') as f:
                 plugin_config = json.load(f)
             
-            # Check if enabled
+            # Check if enabled (plugin.json flag, then operator config override).
+            # `plugins.disabled_names` in config.json.local takes precedence so
+            # operators can disable a plugin without modifying the plugin source,
+            # meaning redeploys won't undo their choices.
+            disabled_by_config = list(
+                (self.config.get('plugins') or {}).get('disabled_names') or []
+            )
+            plugin_name = plugin_config.get('name', '')
+            if plugin_name in disabled_by_config:
+                logger.info(f"Plugin {plugin_name!r} disabled via config")
+                return
             if not plugin_config.get('enabled', True):
                 logger.info(f"Plugin {plugin_config.get('name', 'unknown')} is disabled")
                 return

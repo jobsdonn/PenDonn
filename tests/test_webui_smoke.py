@@ -702,6 +702,47 @@ class TestSettingsPage(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi not installed")
+class TestPluginsPage(unittest.TestCase):
+    """Plugins management page — list, toggle."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.app, cls.config_path, cls.db_path = _build_app_fixture(cls.tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.app.state.db.close_all()
+        except Exception:
+            pass
+        try:
+            cls.tmp.cleanup()
+        except (PermissionError, OSError):
+            pass
+
+    def setUp(self):
+        self.client = TestClient(self.app)
+        self.client.post(
+            "/login",
+            data={"username": "tester", "password": "hunter2-correct-horse", "next": "/"},
+            follow_redirects=False,
+        )
+
+    def test_plugins_page_renders(self):
+        r = self.client.get("/plugins")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Plugin registry", r.text)
+        # Should show 0 errors count tile and installed count.
+        self.assertIn("installed", r.text)
+
+    def test_plugins_nav_item_present_on_dashboard(self):
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("/plugins", r.text)
+
+
+@unittest.skipUnless(HAVE_FASTAPI, "fastapi not installed")
 class TestCaptivePortal(unittest.TestCase):
     """Captive portal endpoints — must be anonymous (auth disabled)."""
 

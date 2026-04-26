@@ -30,6 +30,7 @@ from webui.routes import dashboard as dashboard_routes
 from webui.routes import handshakes as handshakes_routes
 from webui.routes import networks as networks_routes
 from webui.routes import scans as scans_routes
+from webui.routes import plugins as plugins_routes
 from webui.routes import settings as settings_routes
 from webui.routes import system as system_routes
 
@@ -165,4 +166,5 @@ app.include_router(handshakes_routes.router)
 app.include_router(scans_routes.router)
 app.include_router(system_routes.router)
 app.include_router(settings_routes.router)
+app.include_router(plugins_routes.router)
 app.include_router(captive_routes.router)

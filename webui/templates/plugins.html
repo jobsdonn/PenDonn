@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Plugins — PenDonn{% endblock %}
+{% block page_title %}Plugins{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+    {# Global enable status + restart reminder #}
+    <div class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
+        <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700 flex items-center justify-between">
+            <div>
+                <h2 class="font-semibold">Plugin registry</h2>
+                <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Each plugin runs as root after a network is cracked — treat them as trusted code.
+                    Toggling here writes to <code>config.json.local</code>;
+                    the daemon picks up the change on next restart.
+                </p>
+            </div>
+            {% if plugins_global_enabled %}
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
+                Plugins on
+            </span>
+            {% else %}
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
+                Plugins globally off
+            </span>
+            {% endif %}
+        </header>
+
+        {# Summary counts #}
+        {% set total = plugins | length %}
+        {% set active = plugins | selectattr("effective_enabled") | list | length %}
+        {% set errors = plugins | selectattr("load_error") | list | length %}
+        <div class="grid grid-cols-3 divide-x divide-slate-100 dark:divide-ink-700 border-b border-slate-100 dark:border-ink-700">
+            <div class="px-5 py-3 text-center">
+                <div class="text-xl font-bold">{{ total }}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">installed</div>
+            </div>
+            <div class="px-5 py-3 text-center">
+                <div class="text-xl font-bold text-emerald-600 dark:text-emerald-400">{{ active }}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">active</div>
+            </div>
+            <div class="px-5 py-3 text-center">
+                <div class="text-xl font-bold {% if errors %}text-red-600 dark:text-red-400{% else %}text-slate-400{% endif %}">{{ errors }}</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">errors</div>
+            </div>
+        </div>
+
+        {# Plugin list #}
+        {% include "partials/plugins_list.html" %}
+    </div>
+
+    {# Security note #}
+    <div class="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl px-5 py-4 text-sm text-amber-800 dark:text-amber-200 space-y-1">
+        <p class="font-medium">Security notice</p>
+        <p class="text-xs">
+            Plugins execute arbitrary Python as root when the daemon runs post-crack enumeration.
+            Only enable plugins you trust. The loader checks file ownership and permissions
+            (must be <code>root:root 0700</code>) — see <code>docs/SAFETY.md</code> for details.
+        </p>
+    </div>
+</div>
+{% endblock %}

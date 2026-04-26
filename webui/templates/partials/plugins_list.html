@@ -1,0 +1,77 @@
+{# Plugin list partial. Rendered both inline on the page load and as
+   the hx-swap target when a toggle changes. #}
+
+<div id="plugins-list" class="divide-y divide-slate-100 dark:divide-ink-700">
+
+    {% if not plugins_global_enabled %}
+    <div class="px-5 py-3 bg-amber-50 dark:bg-amber-950/30 border-b border-amber-200 dark:border-amber-900 text-xs text-amber-800 dark:text-amber-200">
+        Plugins are globally disabled (<code>plugins.enabled = false</code> in config).
+        Enable them first, then use the toggles below.
+    </div>
+    {% endif %}
+
+    {% for p in plugins %}
+    <div class="flex items-start gap-3 px-5 py-3">
+        {# status dot #}
+        <div class="mt-0.5 shrink-0">
+            {% if p.load_error %}
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-400" title="Load error"></span>
+            {% elif p.effective_enabled %}
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-ok" title="Active"></span>
+            {% else %}
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-slate-300 dark:bg-ink-600" title="Disabled"></span>
+            {% endif %}
+        </div>
+
+        {# info #}
+        <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2 flex-wrap">
+                <span class="font-medium text-sm">{{ p.name }}</span>
+                <span class="text-xs text-slate-400 dark:text-slate-500">v{{ p.version }}</span>
+                {% if p.author %}
+                <span class="text-xs text-slate-400 dark:text-slate-500">· {{ p.author }}</span>
+                {% endif %}
+            </div>
+            {% if p.description %}
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">{{ p.description }}</p>
+            {% endif %}
+            {% if p.load_error %}
+            <p class="text-xs text-red-600 dark:text-red-400 mt-0.5">Error: {{ p.load_error }}</p>
+            {% elif not p.manifest_enabled %}
+            <p class="text-xs text-slate-400 mt-0.5">Disabled in plugin.json (source file)</p>
+            {% endif %}
+        </div>
+
+        {# toggle #}
+        {% if not p.load_error and p.manifest_enabled %}
+        <div class="shrink-0">
+            {% if p.operator_disabled %}
+            <form hx-post="/partials/plugins/{{ p.dir_name }}/toggle"
+                  hx-target="#plugins-list"
+                  hx-swap="outerHTML">
+                <input type="hidden" name="enable" value="1">
+                <button type="submit"
+                        class="px-2 py-1 text-xs rounded bg-slate-100 dark:bg-ink-800 hover:bg-slate-200 dark:hover:bg-ink-700 text-slate-600 dark:text-slate-400">
+                    Enable
+                </button>
+            </form>
+            {% else %}
+            <form hx-post="/partials/plugins/{{ p.dir_name }}/toggle"
+                  hx-target="#plugins-list"
+                  hx-swap="outerHTML">
+                <input type="hidden" name="enable" value="0">
+                <button type="submit"
+                        class="px-2 py-1 text-xs rounded bg-accent-deep/10 hover:bg-accent-deep/20 text-accent-deep font-medium">
+                    Disable
+                </button>
+            </form>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="px-5 py-8 text-center text-sm text-slate-400 dark:text-slate-500">
+        No plugins found in <code>{{ plugins_dir }}</code>.
+    </div>
+    {% endfor %}
+</div>
