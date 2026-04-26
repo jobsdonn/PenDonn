@@ -109,32 +109,38 @@ class NetworkEnumerator:
     
     def _scan_monitor(self):
         """Monitor for networks ready to scan"""
-        scanned_networks = set()  # Track networks we've already started scanning
-        
+        # Pre-populate with SSIDs of completed/running scans so we never re-scan those.
+        # Failed scans are NOT pre-populated — they get one retry per daemon start.
+        existing_scans = self.db.get_scans(network_id=None)
+        scanned_networks = {
+            s['ssid'] for s in existing_scans
+            if s.get('status') in ('completed', 'running')
+        }
+
         while self.running:
             try:
                 if self.auto_scan:
                     # Get cracked passwords
                     cracked = self.db.get_cracked_passwords()
-                    
+
                     for entry in cracked:
-                        bssid = entry['bssid']
-                        
-                        # Skip if we already started a scan for this network
-                        if bssid in scanned_networks:
+                        ssid = entry['ssid']
+
+                        # Skip if we already started a scan for this network this run
+                        if ssid in scanned_networks:
                             continue
-                        
-                        # Check if already scanned in database
+
+                        # Also skip if a scan is currently running in the DB
                         existing_scans = self.db.get_scans(network_id=None)
-                        already_scanned = any(
-                            s['ssid'] == entry['ssid'] and s['status'] in ('completed', 'running', 'failed')
+                        already_running = any(
+                            s['ssid'] == ssid and s['status'] == 'running'
                             for s in existing_scans
                         )
-                        
-                        if not already_scanned:
-                            # Mark as started to prevent duplicates
-                            scanned_networks.add(bssid)
-                            
+
+                        if not already_running:
+                            # Mark as started to prevent duplicates within this run
+                            scanned_networks.add(ssid)
+
                             # Start enumeration
                             self.enumerate_network(
                                 entry['ssid'],
