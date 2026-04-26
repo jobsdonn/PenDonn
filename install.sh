@@ -132,6 +132,7 @@ apt-get install -y \
     hashcat \
     nmap \
     tcpdump \
+    smbclient \
     wireless-tools \
     net-tools \
     iw \
@@ -159,6 +160,7 @@ apt-get install -y \
             hashcat \
             nmap \
             tcpdump \
+            smbclient \
             wireless-tools \
             net-tools \
             iw \
@@ -1260,6 +1262,11 @@ command -v aircrack-ng >/dev/null 2>&1 \
 command -v tcpdump >/dev/null 2>&1 \
     && _smoke_ok "tcpdump present" \
     || _smoke_err "tcpdump not found — pcapng conversion will fail"
+
+# smbclient (needed by SMB vulnerability scanner plugin)
+command -v smbclient >/dev/null 2>&1 \
+    && _smoke_ok "smbclient present" \
+    || _smoke_err "smbclient not found — SMB scanner plugin will fail silently"
 
 echo ""
 if [ "$SMOKE_FAIL" -eq 0 ]; then
