@@ -69,6 +69,16 @@ app.state.config_path = CONFIG_PATH
 app.state.auth = auth_mod.AuthSettings(config.get("web", {}) or {})
 app.state.db = Database(config["database"]["path"])
 
+# Warn loudly if UI is reachable on the LAN but has no authentication.
+# The systemd unit binds to 0.0.0.0, so this is the default post-install state
+# until the operator runs scripts/hash-password.py and sets basic_auth in .local.
+if not app.state.auth.enabled:
+    logger.warning(
+        "⚠ SECURITY: basic_auth is DISABLED — the web UI is open to anyone on "
+        "the network. Set a password via scripts/hash-password.py and add "
+        "web.basic_auth.enabled=true to config.json.local."
+    )
+
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 templates.env.globals["app_version"] = app.version
 templates.env.globals["auth_enabled"] = app.state.auth.enabled
