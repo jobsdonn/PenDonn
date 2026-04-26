@@ -147,7 +147,6 @@ apt-get install -y \
     aircrack-ng \
     cowpatty \
     john \
-    hashcat \
     nmap \
     tcpdump \
     smbclient \

@@ -26,18 +26,12 @@
   },
   "cracking": {
     "enabled": true,
-    "engines": ["cowpatty", "hashcat", "aircrack-ng", "john"],
-    "_engines_comment": "Tried in order. cowpatty first: reads .pcapng natively, pure CPU, no OpenCL — most reliable on Raspberry Pi 4 where hashcat 6.2.6 + PoCL segfaults during ARM64 self-test. hashcat second: faster on x86/GPU hosts. aircrack-ng third: .cap fallback. john last resort.",
+    "engines": ["cowpatty", "aircrack-ng", "john"],
+    "_engines_comment": "Tried in order. cowpatty: reads .pcapng natively, pure CPU, reliable on Raspberry Pi 4. aircrack-ng: .cap fallback. john: last resort. hashcat removed — local hashcat + PoCL segfaults on ARM64; will be re-added as remote-hashcat feature.",
     "wordlist_path": "/usr/share/wordlists/rockyou.txt",
     "auto_start_cracking": true,
     "max_concurrent_cracks": 2,
     "john_format": "wpapsk",
-    "hashcat_mode": 22000,
-    "hashcat_rules_dir": "./rules",
-    "use_rules": true,
-    "brute_force": false,
-    "brute_max_length": 8,
-    "session_prefix": "pendonn",
     "extra_wordlists": []
   },
   "enumeration": {
