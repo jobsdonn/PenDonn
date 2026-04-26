@@ -98,6 +98,13 @@
       }
     }
   },
+  "retention": {
+    "_comment": "Auto-purge old data to keep the SD card from filling up. All thresholds are in days. Set a value to 0 to disable that purge. cracked_passwords and audit_log are never purged — they're your evidence.",
+    "enabled": true,
+    "system_logs_days": 7,
+    "failed_handshakes_days": 30,
+    "scans_days": 90
+  },
   "safety": {
     "_comment": "SSH-lockout protection. Defaults are intentionally strict. See docs/SAFETY.md before changing anything here.",
     "enabled": true,

@@ -787,6 +787,89 @@ class Database:
             logger.error(f"Error resetting database: {e}")
             raise
     
+    def purge_old_data(
+        self,
+        system_logs_days: int = 7,
+        failed_handshakes_days: int = 30,
+        scans_days: int = 90,
+        handshakes_dir: str = "./handshakes",
+    ) -> Dict:
+        """Delete old rows to keep the database from growing unbounded.
+
+        Rules:
+          - system_logs: rows older than system_logs_days are deleted.
+          - handshakes: rows with status='failed' older than
+            failed_handshakes_days are deleted; their files are removed.
+          - scans + vulnerabilities: scans older than scans_days are deleted
+            (cascade deletes vulnerabilities via FK).
+          - cracked_passwords: never purged — operator evidence.
+          - audit_log: never purged — legal/compliance evidence.
+
+        Returns a dict summarising what was deleted.
+        """
+        result = {"logs": 0, "handshakes": 0, "handshake_files": 0, "scans": 0}
+        try:
+            conn = self._ensure_connection()
+
+            if system_logs_days > 0:
+                cur = conn.execute(
+                    "DELETE FROM system_logs WHERE timestamp < datetime('now', ?)",
+                    (f"-{system_logs_days} days",),
+                )
+                result["logs"] = cur.rowcount
+
+            if failed_handshakes_days > 0:
+                # Collect capture file paths before deleting rows.
+                rows = conn.execute(
+                    "SELECT file_path FROM handshakes "
+                    "WHERE status='failed' AND capture_date < datetime('now', ?)",
+                    (f"-{failed_handshakes_days} days",),
+                ).fetchall()
+                stale_files = [r[0] for r in rows if r[0]]
+                cur = conn.execute(
+                    "DELETE FROM handshakes "
+                    "WHERE status='failed' AND capture_date < datetime('now', ?)",
+                    (f"-{failed_handshakes_days} days",),
+                )
+                result["handshakes"] = cur.rowcount
+                for fpath in stale_files:
+                    for ext in ("", ".pcapng", ".cap", ".22000"):
+                        p = fpath if not ext else (
+                            fpath.rsplit(".", 1)[0] + ext
+                            if "." in fpath else fpath + ext
+                        )
+                        if os.path.isfile(p):
+                            try:
+                                os.unlink(p)
+                                result["handshake_files"] += 1
+                            except OSError:
+                                pass
+
+            if scans_days > 0:
+                cur = conn.execute(
+                    "DELETE FROM scans WHERE started_at < datetime('now', ?)",
+                    (f"-{scans_days} days",),
+                )
+                result["scans"] = cur.rowcount
+
+            conn.commit()
+
+            total = sum(result.values())
+            if total > 0:
+                logger.info(
+                    "Retention purge: %d log rows, %d handshake rows, "
+                    "%d files, %d scan rows deleted",
+                    result["logs"], result["handshakes"],
+                    result["handshake_files"], result["scans"],
+                )
+            else:
+                logger.debug("Retention purge: nothing to clean up")
+
+        except Exception as e:
+            logger.error(f"Retention purge failed: {e}", exc_info=True)
+
+        return result
+
     def close(self):
         """Close database connection for current thread"""
         if hasattr(self._local, 'conn') and self._local.conn:

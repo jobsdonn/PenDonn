@@ -148,12 +148,20 @@ class PenDonn:
         
         logger.info("PenDonn started successfully")
         logger.info("System is now operational")
-        
+
+        # Initial retention purge (at-startup cleanup).
+        self._retention_purge()
+        last_purge = time.time()
+
         # Main loop
         try:
             while self.running:
                 self._status_update()
                 time.sleep(30)
+                # Daily retention purge.
+                if time.time() - last_purge >= 86400:
+                    self._retention_purge()
+                    last_purge = time.time()
         
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt")
@@ -211,6 +219,24 @@ class PenDonn:
         except Exception as e:
             logger.error(f"Status update error: {e}", exc_info=True)
     
+    def _retention_purge(self):
+        """Run the configured retention policy against the DB and handshake files."""
+        try:
+            ret = (self.config.get("retention") or {})
+            if not ret.get("enabled", True):
+                return
+            handshakes_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "handshakes"
+            )
+            self.db.purge_old_data(
+                system_logs_days=int(ret.get("system_logs_days", 7)),
+                failed_handshakes_days=int(ret.get("failed_handshakes_days", 30)),
+                scans_days=int(ret.get("scans_days", 90)),
+                handshakes_dir=handshakes_dir,
+            )
+        except Exception as e:
+            logger.error(f"Retention purge error: {e}", exc_info=True)
+
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""
         logger.info(f"Received signal {signum}")
