@@ -794,7 +794,8 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
     echo ""
     
     CONFIG_FILE="$INSTALL_DIR/config/config.json"
-    
+    LOCAL_FILE="${CONFIG_FILE}.local"
+
     # WiFi Interface Configuration
     echo -e "${BLUE}[1/5] WiFi Interface Configuration${NC}"
     echo -e "${YELLOW}You need 3 WiFi interfaces:${NC}"
@@ -876,20 +877,22 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
         echo "  Monitor:    $MON_MAC"
         echo "  Attack:     $ATK_MAC"
         
-        # Update config file with Python (more reliable than sed)
+        # Write to .local so git updates never clobber operator settings
         $INSTALL_DIR/venv/bin/python3 -c "
-import json
-with open('$CONFIG_FILE', 'r') as f:
-    config = json.load(f)
-config['wifi']['management_interface'] = '$MGMT_IFACE'
-config['wifi']['monitor_interface'] = '$MON_IFACE'
-config['wifi']['attack_interface'] = '$ATK_IFACE'
-config['wifi']['management_mac'] = '$MGMT_MAC'
-config['wifi']['monitor_mac'] = '$MON_MAC'
-config['wifi']['attack_mac'] = '$ATK_MAC'
-with open('$CONFIG_FILE', 'w') as f:
-    json.dump(config, f, indent=2)
-print('Config updated: WiFi interfaces and MAC addresses configured')
+import json, os
+local = '$LOCAL_FILE'
+overlay = json.load(open(local)) if os.path.isfile(local) else {}
+overlay.setdefault('wifi', {})
+overlay['wifi']['management_interface'] = '$MGMT_IFACE'
+overlay['wifi']['monitor_interface'] = '$MON_IFACE'
+overlay['wifi']['attack_interface'] = '$ATK_IFACE'
+overlay['wifi']['management_mac'] = '$MGMT_MAC'
+overlay['wifi']['monitor_mac'] = '$MON_MAC'
+overlay['wifi']['attack_mac'] = '$ATK_MAC'
+with open(local, 'w') as f:
+    json.dump(overlay, f, indent=2)
+os.chmod(local, 0o600)
+print('Local config updated: WiFi interfaces and MAC addresses configured')
 "
     else
         print_warning "Not enough interfaces for auto-configuration"
@@ -922,13 +925,14 @@ print('Config updated: WiFi interfaces and MAC addresses configured')
     # safe state. Empty list + strict=true = no attacks; the operator can
     # add SSIDs later via the web UI's Settings page.
     $INSTALL_DIR/venv/bin/python3 -c "
-import json
-with open('$CONFIG_FILE', 'r') as f:
-    config = json.load(f)
+import json, os
+local = '$LOCAL_FILE'
+overlay = json.load(open(local)) if os.path.isfile(local) else {}
 ssids = [$ALLOWLIST_SSIDS] if '$ALLOWLIST_SSIDS' else []
-config['allowlist'] = {'strict': True, 'ssids': ssids}
-with open('$CONFIG_FILE', 'w') as f:
-    json.dump(config, f, indent=2)
+overlay['allowlist'] = {'strict': True, 'ssids': ssids}
+with open(local, 'w') as f:
+    json.dump(overlay, f, indent=2)
+os.chmod(local, 0o600)
 print(f'Allowlist: strict=true, {len(ssids)} SSID(s)')
 "
     if [ -n "$ALLOWLIST_SSIDS" ]; then
@@ -947,18 +951,21 @@ print(f'Allowlist: strict=true, {len(ssids)} SSID(s)')
     # Generate random secret key
     SECRET_KEY=$(openssl rand -hex 32)
     
-    # Update config with Python
+    # Update .local with Python
     $INSTALL_DIR/venv/bin/python3 -c "
-import json
-with open('$CONFIG_FILE', 'r') as f:
-    config = json.load(f)
-config['web']['port'] = $WEB_PORT
-config['web']['secret_key'] = '$SECRET_KEY'
-with open('$CONFIG_FILE', 'w') as f:
-    json.dump(config, f, indent=2)
-print('Config updated: web.port = $WEB_PORT, secret_key generated')
+import json, os
+local = '$LOCAL_FILE'
+overlay = json.load(open(local)) if os.path.isfile(local) else {}
+overlay.setdefault('web', {})
+overlay['web']['port'] = $WEB_PORT
+overlay['web']['secret_key'] = '$SECRET_KEY'
+overlay['web']['host'] = '0.0.0.0'
+with open(local, 'w') as f:
+    json.dump(overlay, f, indent=2)
+os.chmod(local, 0o600)
+print('Local config updated: web.port = $WEB_PORT, secret_key generated')
 "
-    
+
     echo -e "${GREEN}Web interface configured on port $WEB_PORT${NC}"
     echo -e "${GREEN}Random secret key generated${NC}"
     
@@ -978,15 +985,21 @@ print('Config updated: web.port = $WEB_PORT, secret_key generated')
         echo -e "${GREEN}Auto-cracking enabled${NC}"
     fi
     
-    # Update config with Python (more reliable than sed for JSON)
+    # Write to .local; also set platform-aware engine order (ARM64 = aircrack-ng first)
     $INSTALL_DIR/venv/bin/python3 -c "
-import json
-with open('$CONFIG_FILE', 'r') as f:
-    config = json.load(f)
-config['cracking']['auto_start_cracking'] = $AUTO_CRACK_VALUE
-with open('$CONFIG_FILE', 'w') as f:
-    json.dump(config, f, indent=2)
-print('Config updated: auto_start_cracking = ' + str($AUTO_CRACK_VALUE))
+import json, os, platform
+local = '$LOCAL_FILE'
+overlay = json.load(open(local)) if os.path.isfile(local) else {}
+overlay.setdefault('cracking', {})
+overlay['cracking']['auto_start_cracking'] = $AUTO_CRACK_VALUE
+# On ARM64 (RPi4), hashcat+PoCL segfaults — keep aircrack-ng first
+machine = platform.machine().lower()
+if machine in ('aarch64', 'armv7l', 'arm'):
+    overlay['cracking']['engines'] = ['aircrack-ng', 'hashcat', 'john']
+with open(local, 'w') as f:
+    json.dump(overlay, f, indent=2)
+os.chmod(local, 0o600)
+print('Local config updated: auto_start_cracking = ' + str($AUTO_CRACK_VALUE) + ', arch=' + machine)
 "
     
     echo ""
@@ -1005,15 +1018,17 @@ print('Config updated: auto_start_cracking = ' + str($AUTO_CRACK_VALUE))
         echo -e "${YELLOW}Display disabled (headless mode)${NC}"
     fi
     
-    # Update config with Python
+    # Update .local with Python
     $INSTALL_DIR/venv/bin/python3 -c "
-import json
-with open('$CONFIG_FILE', 'r') as f:
-    config = json.load(f)
-config['display']['enabled'] = $DISPLAY_ENABLED
-with open('$CONFIG_FILE', 'w') as f:
-    json.dump(config, f, indent=2)
-print('Config updated: display.enabled = ' + str($DISPLAY_ENABLED))
+import json, os
+local = '$LOCAL_FILE'
+overlay = json.load(open(local)) if os.path.isfile(local) else {}
+overlay.setdefault('display', {})
+overlay['display']['enabled'] = $DISPLAY_ENABLED
+with open(local, 'w') as f:
+    json.dump(overlay, f, indent=2)
+os.chmod(local, 0o600)
+print('Local config updated: display.enabled = ' + str($DISPLAY_ENABLED))
 "
     
     echo ""
@@ -1056,18 +1071,34 @@ print('Config updated: display.enabled = ' + str($DISPLAY_ENABLED))
     echo "  Display: $HAS_DISPLAY"
     echo ""
     
-    # Show actual saved config values for verification
+    # Show actual saved config values for verification (read merged base+local)
     echo -e "${BLUE}Saved Configuration Values:${NC}"
     $INSTALL_DIR/venv/bin/python3 -c "
-import json
-with open('$CONFIG_FILE', 'r') as f:
+import json, copy, os
+def deep_merge(base, overlay):
+    out = copy.deepcopy(base)
+    for k, v in overlay.items():
+        if k.startswith('_'):
+            continue
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = deep_merge(out[k], v)
+        else:
+            out[k] = copy.deepcopy(v)
+    return out
+with open('$CONFIG_FILE') as f:
     config = json.load(f)
+local = '$LOCAL_FILE'
+if os.path.isfile(local):
+    with open(local) as f:
+        config = deep_merge(config, json.load(f))
 print(f\"  auto_start_cracking: {config['cracking']['auto_start_cracking']}\")
 print(f\"  display.enabled: {config['display']['enabled']}\")
 print(f\"  web.port: {config['web']['port']}\")
 print(f\"  allowlist.ssids: {len(config['allowlist']['ssids'])} SSID(s) (strict={config['allowlist'].get('strict', True)})\")
 if 'wifi' in config and 'monitor_interface' in config['wifi']:
     print(f\"  monitor_interface: {config['wifi']['monitor_interface']}\")
+print(f\"  cracking.engines: {config['cracking'].get('engines', ['aircrack-ng'])}\")
+print(f\"  local overlay: {local} ({'found' if os.path.isfile(local) else 'NOT FOUND — settings not saved!'})\")
 "
     echo ""
     
@@ -1089,7 +1120,8 @@ EOF
 echo -e "${NC}"
 
 echo -e "${BLUE}Installation Directory:${NC} $INSTALL_DIR"
-echo -e "${BLUE}Configuration File:${NC} $INSTALL_DIR/config/config.json"
+echo -e "${BLUE}Configuration File:${NC} $INSTALL_DIR/config/config.json (base, tracked)"
+echo -e "${BLUE}Local Config:${NC}       $INSTALL_DIR/config/config.json.local (your settings, gitignored)"
 echo -e "${BLUE}Database Location:${NC} $INSTALL_DIR/data/pendonn.db"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
@@ -1181,6 +1213,60 @@ echo -e "  • wlan2 = Attack interface (captures handshakes)"
 echo ""
 echo -e "${GREEN}Installation complete! Configure before starting services.${NC}"
 echo ""
+echo -e "${BLUE}Running post-install smoke test...${NC}"
+SMOKE_PASS=0
+SMOKE_FAIL=0
+
+_smoke_ok()  { echo -e "  ${GREEN}✓${NC} $1"; SMOKE_PASS=$((SMOKE_PASS+1)); }
+_smoke_err() { echo -e "  ${RED}✗${NC} $1"; SMOKE_FAIL=$((SMOKE_FAIL+1)); }
+
+# Python venv
+$INSTALL_DIR/venv/bin/python3 -c "import sys; assert sys.version_info >= (3,9)" 2>/dev/null \
+    && _smoke_ok "Python 3.9+ venv OK" || _smoke_err "Python venv broken"
+
+# Config loads without error
+$INSTALL_DIR/venv/bin/python3 -c "
+import sys; sys.path.insert(0, '$INSTALL_DIR')
+from core.config_loader import load
+c = load('$INSTALL_DIR/config/config.json')
+assert c.get('system', {}).get('name') == 'PenDonn', 'name mismatch'
+" 2>/dev/null && _smoke_ok "config_loader OK" || _smoke_err "config_loader failed — check config.json / config.json.local syntax"
+
+# config.json.local is valid JSON (if it exists)
+if [ -f "$INSTALL_DIR/config/config.json.local" ]; then
+    $INSTALL_DIR/venv/bin/python3 -c "
+import json
+with open('$INSTALL_DIR/config/config.json.local') as f:
+    json.load(f)
+" 2>/dev/null && _smoke_ok "config.json.local is valid JSON" \
+    || _smoke_err "config.json.local is INVALID JSON — wizard write may have failed"
+else
+    _smoke_err "config.json.local not found — wizard may not have run or write failed"
+fi
+
+# hcxdumptool
+command -v hcxdumptool >/dev/null 2>&1 \
+    && _smoke_ok "hcxdumptool $(hcxdumptool --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" \
+    || _smoke_err "hcxdumptool not found — capture will fail"
+
+# aircrack-ng
+command -v aircrack-ng >/dev/null 2>&1 \
+    && _smoke_ok "aircrack-ng $(aircrack-ng --version 2>&1 | head -1 | grep -oE '[0-9]+\.[0-9]+')" \
+    || _smoke_err "aircrack-ng not found — cracking will fail"
+
+# tcpdump (needed for pcapng→cap conversion)
+command -v tcpdump >/dev/null 2>&1 \
+    && _smoke_ok "tcpdump present" \
+    || _smoke_err "tcpdump not found — pcapng conversion will fail"
+
+echo ""
+if [ "$SMOKE_FAIL" -eq 0 ]; then
+    echo -e "${GREEN}Smoke test: all $SMOKE_PASS checks passed${NC}"
+else
+    echo -e "${RED}Smoke test: $SMOKE_FAIL check(s) FAILED, $SMOKE_PASS passed — fix before starting services${NC}"
+fi
+echo ""
+
 echo -e "${BLUE}Checking service status...${NC}"
 sleep 2
 systemctl status pendonn --no-pager -n 10 || true

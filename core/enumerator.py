@@ -338,7 +338,7 @@ class NetworkEnumerator:
             try:
                 pids_by_iface = find_supplicant_pids_by_iface()
                 pids_to_kill = self._ssh_guard.assert_safe_to_kill_supplicant(
-                    {iface: pids_by_iface.get(iface, [])}
+                    {interface: pids_by_iface.get(interface, [])}
                 )
                 for pid in pids_to_kill:
                     try:
