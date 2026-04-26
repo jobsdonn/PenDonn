@@ -115,11 +115,22 @@
             <div>
                 <label class="text-xs text-slate-600 dark:text-slate-400">Webhook URL</label>
                 <input type="url" name="wh_url" value="{{ webhook.url }}"
-                       placeholder="https://hooks.slack.com/services/... or https://your-server/webhook"
+                       placeholder="https://discord.com/api/webhooks/... or https://hooks.slack.com/services/..."
                        class="w-full mt-0.5 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm font-mono">
+            </div>
+
+            <div>
+                <label class="text-xs text-slate-600 dark:text-slate-400">Payload format</label>
+                <select name="wh_format"
+                        class="w-full mt-0.5 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm">
+                    <option value="json"    {% if webhook.format == 'json' %}selected{% endif %}>Generic JSON ({event, priority, title, body, tags, data})</option>
+                    <option value="discord" {% if webhook.format == 'discord' %}selected{% endif %}>Discord (content + colored embed)</option>
+                    <option value="slack"   {% if webhook.format == 'slack' %}selected{% endif %}>Slack (incoming-webhook text + attachment)</option>
+                    <option value="teams"   {% if webhook.format == 'teams' %}selected{% endif %}>Microsoft Teams (legacy MessageCard)</option>
+                </select>
                 <p class="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">
-                    PenDonn POSTs JSON: <code>{event, priority, title, body, tags, data}</code>.
-                    Slack/Teams expect their own shape — use n8n, a relay, or a translator endpoint.
+                    Discord/Slack/Teams have specific webhook formats — pick the right one for your URL.
+                    Generic JSON is for n8n / your own server / anything that doesn't care about shape.
                 </p>
             </div>
 

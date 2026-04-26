@@ -29,40 +29,7 @@
         </div>
     </section>
 
-    <!-- Pre-flight scope authorization. The daemon refuses to attack
-         any allowlisted SSID until a human confirms the scope here.
-         Re-confirm whenever the allowlist gains a new SSID. -->
-    <section class="lg:col-span-2 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
-        <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
-            <h2 class="font-semibold">Scope authorization</h2>
-            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Operator attestation that you have written authorization to attack
-                the allowlisted SSIDs right now. The daemon will not start any
-                handshake capture or deauth until this is confirmed.
-            </p>
-        </header>
-        <div class="p-5">
-            {% include "partials/scope.html" %}
-        </div>
-    </section>
-
-    <!-- Notifications: ntfy push + generic webhook. Both opt-in,
-         run in parallel. Per-event toggles let you e.g. silence
-         scan-complete but still get paged on critical vulns. -->
-    <section class="lg:col-span-3 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
-        <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
-            <h2 class="font-semibold">Notifications</h2>
-            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                ntfy push (phone) and generic webhooks (Slack / Teams / n8n / your own server).
-                Disabled by default. Configure here or directly in <code>config.json.local</code>.
-            </p>
-        </header>
-        <div class="p-5">
-            {% include "partials/notifications.html" %}
-        </div>
-    </section>
-
-    <!-- Safety status -->
+    <!-- Safety status (sits to the right of Allowlist on lg+ screens) -->
     <section class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
         <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
             <h2 class="font-semibold">Safety</h2>
@@ -96,6 +63,39 @@
                 Only legitimate for RPi Zero 2 W single-iface mode or SSH-over-Ethernet.
             </div>
             {% endif %}
+        </div>
+    </section>
+
+    <!-- Pre-flight scope authorization. The daemon refuses to attack
+         any allowlisted SSID until a human confirms the scope here.
+         Re-confirm whenever the allowlist gains a new SSID. -->
+    <section class="lg:col-span-3 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
+        <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
+            <h2 class="font-semibold">Scope authorization</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Operator attestation that you have written authorization to attack
+                the allowlisted SSIDs right now. The daemon will not start any
+                handshake capture or deauth until this is confirmed.
+            </p>
+        </header>
+        <div class="p-5">
+            {% include "partials/scope.html" %}
+        </div>
+    </section>
+
+    <!-- Notifications: ntfy push + generic webhook. Both opt-in,
+         run in parallel. Per-event toggles let you e.g. silence
+         scan-complete but still get paged on critical vulns. -->
+    <section class="lg:col-span-3 bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl">
+        <header class="px-5 py-3 border-b border-slate-200 dark:border-ink-700">
+            <h2 class="font-semibold">Notifications</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                ntfy push (phone) and generic webhooks (Slack / Teams / n8n / your own server).
+                Disabled by default. Configure here or directly in <code>config.json.local</code>.
+            </p>
+        </header>
+        <div class="p-5">
+            {% include "partials/notifications.html" %}
         </div>
     </section>
 

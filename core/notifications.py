@@ -144,32 +144,68 @@ class NtfyBackend(_Backend):
 # ---------------------------------------------------------------------------
 
 
+def _autodetect_webhook_format(url: str) -> str:
+    """Best-effort guess at the destination's expected payload shape
+    based on the URL host. Used when config doesn't pin `format`
+    explicitly. Falls back to generic JSON."""
+    u = (url or "").lower()
+    if "discord.com/api/webhooks" in u or "discordapp.com/api/webhooks" in u:
+        return "discord"
+    if "hooks.slack.com" in u:
+        return "slack"
+    if "office.com/webhook" in u or "outlook.office.com/webhook" in u or "webhook.office.com" in u:
+        return "teams"
+    return "json"
+
+
+# Priority -> color (0xRRGGBB) for rich-format outputs.
+_PRIORITY_COLOR = {
+    "low":     0x94A3B8,  # slate
+    "normal":  0x0EA5E9,  # sky
+    "high":    0xF59E0B,  # amber
+    "urgent":  0xEF4444,  # red
+}
+
+
 class WebhookBackend(_Backend):
-    """POSTs a JSON payload to a configured URL.
+    """POSTs to a configured URL. Several output formats are supported
+    so common destinations work without an external relay.
 
-    Payload shape:
-        {
-          "event": "<event_type>",     # handshake|crack|scan|vulnerability|test
-          "priority": "low|normal|high|urgent",
-          "title": "<short summary>",
-          "body": "<longer text>",
-          "tags": ["lock", "fire", ...],
-          "data": { ...event-specific fields... }
-        }
+    Formats:
+      - "json" (default): generic
+            {event, priority, title, body, tags, data}
+      - "discord": Discord incoming-webhook
+            {username, content, embeds:[{title, description, color}]}
+      - "slack":   Slack incoming-webhook
+            {text, blocks}
+      - "teams":   Microsoft Teams legacy connector
+            {"@type": "MessageCard", title, text, themeColor}
 
-    Custom headers can be set in config (e.g. for bearer auth, Slack
-    incoming-webhook URLs already encode their own auth). Slack/Teams
-    don't read this exact JSON shape — for those, use a relay/n8n flow.
+    Custom headers can be set per backend (for bearer auth on private
+    endpoints; Slack/Discord/Teams hooks encode their auth in the URL
+    so headers are usually unnecessary for those).
     """
     name = "webhook"
 
-    def __init__(self, url: str, headers: Optional[Dict[str, str]] = None):
+    SUPPORTED_FORMATS = ("json", "discord", "slack", "teams")
+
+    def __init__(self, url: str, headers: Optional[Dict[str, str]] = None,
+                 fmt: str = "json"):
         super().__init__()
         self.url = url
         self.headers = headers or {}
+        if fmt not in self.SUPPORTED_FORMATS:
+            logger.warning(
+                f"Unknown webhook format {fmt!r}; falling back to 'json'"
+            )
+            fmt = "json"
+        self.fmt = fmt
 
-    def _deliver(self, event: Dict) -> None:
-        payload = json.dumps({
+    # ---- format translators ----
+
+    @staticmethod
+    def _payload_json(event: Dict) -> bytes:
+        return json.dumps({
             "event": event.get("event"),
             "priority": event.get("priority"),
             "title": event.get("title"),
@@ -177,6 +213,75 @@ class WebhookBackend(_Backend):
             "tags": (event.get("tags") or "").split(",") if event.get("tags") else [],
             "data": event.get("data") or {},
         }).encode("utf-8")
+
+    @staticmethod
+    def _payload_discord(event: Dict) -> bytes:
+        title = event.get("title") or "PenDonn"
+        body = event.get("body") or ""
+        priority = event.get("priority", "normal")
+        color = _PRIORITY_COLOR.get(priority, _PRIORITY_COLOR["normal"])
+        return json.dumps({
+            "username": "PenDonn",
+            # `content` covers clients that ignore embeds. Embed gives
+            # the colored sidebar that makes severity scannable.
+            "content": f"**{title}**",
+            "embeds": [{
+                "title": title,
+                "description": body[:4000] if body else " ",
+                "color": color,
+            }],
+        }).encode("utf-8")
+
+    @staticmethod
+    def _payload_slack(event: Dict) -> bytes:
+        title = event.get("title") or "PenDonn"
+        body = event.get("body") or ""
+        priority = event.get("priority", "normal")
+        # Slack uses string-named "color" on attachments — but for incoming
+        # webhooks we send `text` as the primary content and a colored
+        # attachment for severity.
+        slack_color = {
+            "low":     "#94A3B8",
+            "normal":  "#0EA5E9",
+            "high":    "#F59E0B",
+            "urgent":  "#EF4444",
+        }.get(priority, "#0EA5E9")
+        return json.dumps({
+            "text": title,
+            "attachments": [{
+                "color": slack_color,
+                "text": body or " ",
+            }],
+        }).encode("utf-8")
+
+    @staticmethod
+    def _payload_teams(event: Dict) -> bytes:
+        title = event.get("title") or "PenDonn"
+        body = event.get("body") or ""
+        priority = event.get("priority", "normal")
+        # Teams legacy MessageCard themeColor is hex without `#`.
+        theme_color = "{:06X}".format(
+            _PRIORITY_COLOR.get(priority, _PRIORITY_COLOR["normal"])
+        )
+        return json.dumps({
+            "@type": "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "summary": title,
+            "themeColor": theme_color,
+            "title": title,
+            "text": body or " ",
+        }).encode("utf-8")
+
+    def _deliver(self, event: Dict) -> None:
+        if self.fmt == "discord":
+            payload = self._payload_discord(event)
+        elif self.fmt == "slack":
+            payload = self._payload_slack(event)
+        elif self.fmt == "teams":
+            payload = self._payload_teams(event)
+        else:
+            payload = self._payload_json(event)
+
         req = urllib.request.Request(self.url, data=payload, method="POST")
         req.add_header("Content-Type", "application/json")
         req.add_header("User-Agent", "PenDonn/1.0")
@@ -223,9 +328,12 @@ class Notifier:
             )
 
         if webhook_cfg.get("enabled") and webhook_cfg.get("url"):
+            url = webhook_cfg.get("url", "").strip()
+            fmt = webhook_cfg.get("format") or _autodetect_webhook_format(url)
             backend = WebhookBackend(
-                url=webhook_cfg.get("url", "").strip(),
+                url=url,
                 headers=webhook_cfg.get("headers", {}) or {},
+                fmt=fmt,
             )
             backend.start()
             self.backends.append(backend)

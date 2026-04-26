@@ -166,24 +166,32 @@ Event → ntfy priority mapping:
 
 For sensitive engagements, run a self-hosted ntfy server with auth (`server: "https://ntfy.example.com"`, `token: "tk_..."`).
 
-### Generic webhook
+### Webhook (Discord / Slack / Teams / generic)
 
-Posts a JSON payload to any URL with optional custom headers:
+Pick a payload format that matches your destination — Discord, Slack, and Microsoft Teams each expect different shapes, so PenDonn translates accordingly. The format is auto-detected from the URL host if you don't pin it explicitly.
 
 ```json
 {
   "notifications": {
     "webhook": {
       "enabled": true,
-      "url": "https://your-server.example.com/pendonn-events",
-      "headers": { "Authorization": "Bearer ..." },
+      "url":     "https://discord.com/api/webhooks/.../...",
+      "format":  "discord",
+      "headers": {},
       "notify_on": { "handshake": true, "crack": true, "vulnerability": true, "scan": true }
     }
   }
 }
 ```
 
-Payload shape per event:
+| `format` | Destination | Payload shape |
+|---|---|---|
+| `discord` | Discord webhook | `{username, content, embeds:[{title, description, color}]}` — colored embed sidebar reflects severity |
+| `slack` | Slack incoming-webhook | `{text, attachments:[{color, text}]}` |
+| `teams` | Microsoft Teams (legacy connector) | `{"@type": "MessageCard", title, text, themeColor}` |
+| `json` | n8n / your own server / anything else | `{event, priority, title, body, tags, data}` (shape below) |
+
+Generic `json` payload per event:
 
 ```json
 {
@@ -197,7 +205,7 @@ Payload shape per event:
 }
 ```
 
-Slack and Teams expect their own incoming-webhook shapes — for those, point this at a small relay (n8n, Cloudflare Worker, or a 20-line Python forwarder) that translates the PenDonn payload into the destination's format.
+The Settings UI has a dropdown so you don't need to touch the config file. URL auto-detection covers `discord.com/api/webhooks/...`, `hooks.slack.com/...`, and `*.webhook.office.com/...`; anything else falls back to `json`.
 
 **Daemon restart needed** for live events to use changed settings — the daemon's long-lived Notifier reads config at startup. The "Test" button uses a fresh Notifier so you can verify a save without bouncing the service.
 
@@ -239,7 +247,7 @@ pendonn/
 │   ├── config.json                 # tracked defaults
 │   ├── config.example.json         # annotated reference
 │   └── config.rpi_zero2w.json      # single-radio variant
-├── tests/            # 176 unit tests, run with: python -m unittest discover tests
+├── tests/            # 186 unit tests, run with: python -m unittest discover tests
 ├── docs/
 │   ├── SAFETY.md                   # SSH lockout + plugin loader trust model
 │   └── DISPLAY_SETUP.md            # Waveshare wiring + library install
@@ -255,7 +263,7 @@ pendonn/
 python -m venv venv
 . venv/bin/activate                 # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-python -m unittest discover tests   # 176 tests, ~7s on a laptop
+python -m unittest discover tests   # 186 tests, ~7s on a laptop
 ```
 
 POSIX-only tests (e.g. `/proc` walking) are skipped on Windows. The web UI runs locally:

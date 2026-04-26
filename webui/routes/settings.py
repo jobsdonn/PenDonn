@@ -367,6 +367,7 @@ def _notifications_status(request: Request) -> Dict[str, Any]:
         "webhook": {
             "enabled": bool(webhook.get("enabled", False)),
             "url": webhook.get("url", ""),
+            "format": webhook.get("format", "json"),
             "headers_count": len((webhook.get("headers") or {})),
             "notify_on": webhook.get("notify_on", {}) or {},
         },
@@ -423,6 +424,7 @@ def notifications_save(
     # webhook fields
     wh_enabled: str = Form(""),
     wh_url: str = Form(""),
+    wh_format: str = Form("json"),
     wh_headers: str = Form(""),  # JSON string {"Header": "value"}
     wh_on_handshake: str = Form(""),
     wh_on_crack: str = Form(""),
@@ -483,9 +485,17 @@ def notifications_save(
                 status_code=400,
                 detail=f"webhook headers must be a JSON object: {e}",
             )
+    valid_formats = ("json", "discord", "slack", "teams")
+    wh_format_clean = (wh_format or "json").lower()
+    if wh_format_clean not in valid_formats:
+        raise HTTPException(
+            status_code=400,
+            detail=f"webhook format must be one of {valid_formats}",
+        )
     wh_block = {
         "enabled": _on(wh_enabled),
         "url": wh_url_clean,
+        "format": wh_format_clean,
         "headers": wh_headers_obj,
         "notify_on": {
             "handshake": _on(wh_on_handshake),

@@ -84,9 +84,10 @@
       }
     },
     "webhook": {
-      "_comment": "Generic webhook — POSTs JSON to any URL. Use for Slack incoming-webhook, Teams workflow, Discord, n8n, or your own endpoint. Custom headers for auth (e.g. {\"Authorization\": \"Bearer ...\"}).",
+      "_comment": "Webhook — POSTs to any URL. `format` chooses payload shape: 'json' (generic), 'discord', 'slack', 'teams'. If omitted, format is auto-detected from the URL host. Custom headers for auth on private endpoints.",
       "enabled": false,
       "url": "",
+      "format": "json",
       "headers": {},
       "notify_on": {
         "handshake": true,
