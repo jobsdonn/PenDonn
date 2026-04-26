@@ -98,7 +98,7 @@
             <footer class="px-5 py-3 border-t border-slate-200 dark:border-ink-700 flex justify-end gap-2">
                 <button @click="open = false" :disabled="busy"
                         class="px-3 py-1.5 rounded text-sm bg-slate-100 dark:bg-ink-800 hover:bg-slate-200 dark:hover:bg-ink-700">Cancel</button>
-                <button @click="async () => {
+                <button @click="(async () => {
                             busy = true; error = ''; success = '';
                             try {
                                 const fd = new FormData();
@@ -114,7 +114,7 @@
                                 }
                             } catch (e) { error = String(e) }
                             finally { busy = false }
-                        }"
+                        })()"
                         :disabled="busy || phrase !== 'RESET'"
                         :class="phrase === 'RESET' && !busy ? 'bg-rose-600 hover:bg-rose-700' : 'bg-rose-300 dark:bg-rose-900/50 cursor-not-allowed'"
                         class="px-3 py-1.5 rounded text-sm text-white">
