@@ -240,7 +240,7 @@ class PDFReport:
     def generate_report(self, include_sections=None):
         if include_sections is None:
             include_sections = [
-                'summary', 'networks', 'handshakes', 'passwords',
+                'summary', 'scope', 'networks', 'handshakes', 'passwords',
                 'scans', 'vulnerabilities', 'recommendations',
             ]
 
@@ -258,6 +258,7 @@ class PDFReport:
         self.story.append(PageBreak())
 
         if 'summary'         in include_sections: self._summary()
+        if 'scope'           in include_sections: self._scope()
         if 'networks'        in include_sections: self._networks()
         if 'handshakes'      in include_sections: self._handshakes()
         if 'passwords'       in include_sections: self._passwords()
@@ -345,6 +346,17 @@ class PDFReport:
         ], cw, ST))
         s.append(Spacer(1, 10*mm))
 
+        # Engagement time window — earliest scan_results CSV / first_seen
+        # network through latest cracked_date / vuln discovered_date.
+        # Useful for chain-of-custody and matching to client's change log.
+        window = self._engagement_window()
+        if window:
+            s.append(Paragraph(
+                f'<b>Engagement window:</b> {window[0]} → {window[1]}',
+                ST['BodyMuted'],
+            ))
+            s.append(Spacer(1, 4*mm))
+
         # Brief narrative
         risk = 'HIGH' if crit > 0 else ('MEDIUM' if high > 0 else 'LOW')
         risk_color = {'HIGH': '#EF4444', 'MEDIUM': '#F59E0B', 'LOW': '#10B981'}[risk]
@@ -360,6 +372,108 @@ class PDFReport:
         s.append(Paragraph(body, ST['Body']))
         s.append(PageBreak())
 
+    def _engagement_window(self):
+        """Return (earliest, latest) timestamps as 'YYYY-MM-DD HH:MM' strings,
+        or None if there's no recorded activity to bracket."""
+        conn = self.db.connect()
+        cur  = conn.cursor()
+        # MIN/MAX across the four event-bearing tables; MIN/MAX of NULLs is NULL,
+        # so missing tables don't pollute the result.
+        cur.execute('''
+            SELECT MIN(t) AS earliest, MAX(t) AS latest FROM (
+                SELECT first_seen        AS t FROM networks
+                UNION ALL SELECT capture_date    FROM handshakes
+                UNION ALL SELECT cracked_date    FROM cracked_passwords
+                UNION ALL SELECT discovered_date FROM vulnerabilities
+            )
+        ''')
+        row = cur.fetchone()
+        if not row or not row['earliest'] or not row['latest']:
+            return None
+        return (row['earliest'][:16], row['latest'][:16])
+
+    # ------------------------------------------------------------------
+    # Scope & Authorisation
+    # ------------------------------------------------------------------
+    def _scope(self):
+        """Document the scope authorisation that was active during testing.
+
+        Pentest reports MUST evidence that the activity was authorised. We
+        pull from the scope_authorizations table — the latest non-revoked
+        row records who confirmed the scope, when, and which SSIDs were in
+        scope. If no row exists (older deployments), we render a warning
+        rather than silently omitting the section.
+        """
+        ST = self.ST
+        s  = self.story
+
+        for p in _section_header('02', 'Scope & Authorisation', ST):
+            s.append(p)
+
+        scope = None
+        try:
+            scope = self.db.get_active_scope()
+        except Exception as e:
+            logger.warning('get_active_scope() not available: %s', e)
+
+        if not scope:
+            s.append(Paragraph(
+                '<font color="#EF4444"><b>No scope authorisation on record.</b></font> '
+                'This deployment predates the scope-authorisation gate, or the '
+                'authorisation has been revoked. Operators MUST confirm scope '
+                'in the WebUI Safety panel before running any active testing.',
+                ST['Body'],
+            ))
+            s.append(PageBreak())
+            return
+
+        ssids = scope.get('ssids') or []
+        confirmed_at = (scope.get('confirmed_at') or '')[:19]
+        confirmed_by = scope.get('confirmed_by') or '(unknown)'
+        note = scope.get('note') or ''
+
+        W = A4[0] - 40*mm
+        meta_data = [
+            ['CONFIRMED BY',  confirmed_by],
+            ['CONFIRMED AT',  confirmed_at],
+            ['SSIDS IN SCOPE', f'{len(ssids)} target{"s" if len(ssids) != 1 else ""}'],
+        ]
+        if note:
+            meta_data.append(['NOTE', note])
+
+        meta_t = Table(meta_data, colWidths=[40*mm, W - 40*mm])
+        meta_t.setStyle(TableStyle([
+            ('FONTNAME',   (0,0),(0,-1), 'Helvetica-Bold'),
+            ('FONTSIZE',   (0,0),(-1,-1), 8),
+            ('TEXTCOLOR',  (0,0),(0,-1), MUTED),
+            ('TEXTCOLOR',  (1,0),(1,-1), INK),
+            ('LEFTPADDING',(0,0),(-1,-1), 0),
+            ('TOPPADDING', (0,0),(-1,-1), 3),
+            ('BOTTOMPADDING',(0,0),(-1,-1), 3),
+            ('LINEBELOW',  (0,0),(-1,-1), 0.3, RULE),
+        ]))
+        s.append(meta_t)
+        s.append(Spacer(1, 6*mm))
+
+        s.append(Paragraph('Authorised target SSIDs:', ST['H3']))
+        if ssids:
+            for ssid in sorted(ssids):
+                s.append(Paragraph(f'• <font face="Courier">{ssid}</font>', ST['Body']))
+        else:
+            s.append(Paragraph(
+                '(empty — scan-only mode; no networks were attacked)',
+                ST['BodyMuted'],
+            ))
+
+        s.append(Spacer(1, 8*mm))
+        s.append(Paragraph(
+            'Any network activity recorded in this report is bounded by the '
+            'scope above. The daemon refused to attack SSIDs not present in '
+            'this list. See the Audit Log in the WebUI for per-action evidence.',
+            ST['BodyMuted'],
+        ))
+        s.append(PageBreak())
+
     # ------------------------------------------------------------------
     # Networks
     # ------------------------------------------------------------------
@@ -368,7 +482,7 @@ class PDFReport:
         s  = self.story
         nets = self.db.get_networks()
 
-        for p in _section_header('02', 'Discovered Networks', ST):
+        for p in _section_header('03', 'Discovered Networks', ST):
             s.append(p)
 
         if not nets:
@@ -402,7 +516,7 @@ class PDFReport:
         cur.execute('SELECT * FROM handshakes ORDER BY id DESC')
         rows = [dict(r) for r in cur.fetchall()]
 
-        for p in _section_header('03', 'Captured Handshakes', ST):
+        for p in _section_header('04', 'Captured Handshakes', ST):
             s.append(p)
 
         if not rows:
@@ -435,7 +549,7 @@ class PDFReport:
         s   = self.story
         pwd = self.db.get_cracked_passwords()
 
-        for p in _section_header('04', 'Recovered Credentials', ST):
+        for p in _section_header('05', 'Recovered Credentials', ST):
             s.append(p)
 
         if not pwd:
@@ -478,7 +592,7 @@ class PDFReport:
         s     = self.story
         scans = self.db.get_scans()
 
-        for p in _section_header('05', 'Network Enumeration', ST):
+        for p in _section_header('06', 'Network Enumeration', ST):
             s.append(p)
 
         if not scans:
@@ -539,7 +653,7 @@ class PDFReport:
         s     = self.story
         vulns = self.db.get_vulnerabilities()
 
-        for p in _section_header('06', 'Vulnerabilities', ST):
+        for p in _section_header('07', 'Vulnerabilities', ST):
             s.append(p)
 
         if not vulns:
@@ -596,7 +710,7 @@ class PDFReport:
         ST = self.ST
         s  = self.story
 
-        for p in _section_header('07', 'Recommendations', ST):
+        for p in _section_header('08', 'Recommendations', ST):
             s.append(p)
 
         recs = [
