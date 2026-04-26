@@ -230,6 +230,7 @@ else
             if git clone --depth 1 https://github.com/aircrack-ng/rtl8188eus.git; then
                 cd rtl8188eus
                 if make -j$(nproc) && make install; then
+                    modprobe 8188eu 2>/dev/null || true
                     print_success "RTL8188EU driver installed"
                 else
                     print_warning "RTL8188EU driver compilation failed (non-critical)"
@@ -252,7 +253,8 @@ else
             if git clone --depth 1 https://github.com/aircrack-ng/rtl8812au.git; then
                 cd rtl8812au
                 if make -j$(nproc) && make install; then
-                    print_success "RTL8812AU driver installed"
+                    modprobe 8812au 2>/dev/null || true
+                    print_success "RTL8812AU/RTL8821AU driver installed"
                 else
                     print_warning "RTL8812AU driver compilation failed (non-critical)"
                 fi
@@ -274,6 +276,7 @@ else
             if git clone --depth 1 https://github.com/aircrack-ng/rtl8814au.git; then
                 cd rtl8814au
                 if make -j$(nproc) && make install; then
+                    modprobe 8814au 2>/dev/null || true
                     print_success "RTL8814AU driver installed"
                 else
                     print_warning "RTL8814AU driver compilation failed (non-critical)"
@@ -296,6 +299,7 @@ else
             if git clone --depth 1 https://github.com/morrownr/88x2bu-20210702.git; then
                 cd 88x2bu-20210702
                 if make -j$(nproc) && make install; then
+                    modprobe 88x2bu 2>/dev/null || true
                     print_success "RTL8822BU driver installed"
                 else
                     print_warning "RTL8822BU driver compilation failed (non-critical)"
@@ -318,6 +322,7 @@ else
             if git clone --depth 1 https://github.com/brektrou/rtl8821CU.git 8821cu; then
                 cd 8821cu
                 if make -j$(nproc) && make install; then
+                    modprobe 8821cu 2>/dev/null || true
                     print_success "RTL8821CU driver installed"
                 else
                     print_warning "RTL8821CU driver compilation failed (non-critical)"
@@ -398,6 +403,7 @@ else
                     make -j$(nproc) && make install
                 fi
                 if [ $? -eq 0 ]; then
+                    modprobe 8852au 2>/dev/null || true
                     print_success "RTL8852AU driver installed"
                 else
                     print_warning "RTL8852AU driver compilation failed (non-critical)"
@@ -412,6 +418,11 @@ else
     fi
 
     print_success "WiFi adapter driver installation complete"
+    # Trigger kernel to re-enumerate USB devices so newly loaded modules
+    # can pick up adapters that were already plugged in before the driver existed.
+    print_status "Re-enumerating USB devices..."
+    udevadm trigger --action=add 2>/dev/null || true
+    sleep 3
 fi
 
 # Prepare installation directory
@@ -688,22 +699,43 @@ echo -e "${BLUE}║              Configuration Wizard                           
 echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
-# Detect WiFi interfaces
+# Detect WiFi interfaces — retry loop so user can plug in adapters without
+# restarting the installer after driver installation.
 print_status "Detecting WiFi interfaces..."
-INTERFACES=($(iw dev 2>/dev/null | grep Interface | awk '{print $2}'))
-INTERFACE_COUNT=${#INTERFACES[@]}
+while true; do
+    INTERFACES=($(iw dev 2>/dev/null | grep Interface | awk '{print $2}'))
+    INTERFACE_COUNT=${#INTERFACES[@]}
 
-echo -e "${YELLOW}Detected WiFi interfaces:${NC}"
-for i in "${!INTERFACES[@]}"; do
-    echo "  $((i+1)). ${INTERFACES[$i]}"
-done
-echo ""
-
-if [ "$INTERFACE_COUNT" -lt 3 ]; then
-    print_warning "Only $INTERFACE_COUNT interface(s) detected!"
-    print_warning "Recommended: 1 onboard WiFi + 2 external WiFi adapters"
+    echo -e "${YELLOW}Detected WiFi interfaces ($INTERFACE_COUNT):${NC}"
+    for i in "${!INTERFACES[@]}"; do
+        IFACE="${INTERFACES[$i]}"
+        MAC=$(cat /sys/class/net/$IFACE/address 2>/dev/null || echo "unknown")
+        echo "  $((i+1)). $IFACE  ($MAC)"
+    done
     echo ""
-fi
+
+    if [ "$INTERFACE_COUNT" -ge 3 ]; then
+        break
+    fi
+
+    echo -e "${YELLOW}Need at least 3 interfaces (1 onboard + 2 USB adapters).${NC}"
+    echo ""
+    echo "  [Enter]  Plug in your USB adapters now and press Enter to re-scan"
+    echo "  [s]      Skip — configure interfaces later via the web UI"
+    echo ""
+    read -rp "> " _IFACE_WAIT
+    if [[ "$_IFACE_WAIT" =~ ^[Ss] ]]; then
+        print_warning "Interface configuration skipped — set via web UI after boot"
+        break
+    fi
+    # Try to load common modules and re-enumerate USB before next scan
+    for _mod in 8812au 8821au 8188eu 8814au 88x2bu 8821cu 8852au rt2800usb ath9k_htc mt76x2u; do
+        modprobe "$_mod" 2>/dev/null || true
+    done
+    udevadm trigger --action=add 2>/dev/null || true
+    sleep 3
+    echo ""
+done
 
 # Ask if user wants to configure now
 read -p "Would you like to configure PenDonn now? (yes/no): " CONFIGURE_NOW
