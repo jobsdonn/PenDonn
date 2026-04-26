@@ -145,6 +145,7 @@ apt-get install -y \
     python3-venv \
     rsync \
     aircrack-ng \
+    cowpatty \
     john \
     hashcat \
     nmap \
@@ -173,6 +174,7 @@ apt-get install -y \
             python3-venv \
             rsync \
             aircrack-ng \
+            cowpatty \
             john \
             hashcat \
             nmap \

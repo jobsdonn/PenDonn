@@ -207,7 +207,9 @@ class PasswordCracker:
                 cracked = False
                 for engine in self.engines:
                     logger.info(f"Attempting to crack with engine: {engine}")
-                    if engine == 'john':
+                    if engine == 'cowpatty':
+                        result = self._crack_with_cowpatty(handshake)
+                    elif engine == 'john':
                         result = self._crack_with_john(handshake)
                     elif engine == 'hashcat':
                         result = self._crack_with_hashcat(handshake)
@@ -256,6 +258,72 @@ class PasswordCracker:
                 logger.error(f"Worker {worker_id} error: {e}", exc_info=True)
                 time.sleep(1)
     
+    def _crack_with_cowpatty(self, handshake: Dict) -> Optional[tuple]:
+        """Crack WPA2 handshake using cowpatty.
+
+        cowpatty reads .pcapng/.cap natively, computes PBKDF2-SHA1 in C, and
+        requires no GPU/OpenCL. Reliable on ARM (Raspberry Pi 4) where the
+        PoCL-based hashcat crashes during kernel self-test.
+
+        Speed on Pi 4: ~140 H/s — sufficient for targeted wordlists; rockyou.txt
+        takes ~29 h. For offline cracking against large wordlists, export the
+        .22000 hash to a GPU host instead.
+        """
+        try:
+            capture_file = handshake['file_path']
+            ssid = handshake['ssid']
+
+            if not os.path.exists(capture_file):
+                logger.error(f"cowpatty: capture file not found: {capture_file}")
+                return None
+
+            # cowpatty must have a wordlist
+            if not os.path.exists(self.wordlist):
+                logger.warning(f"cowpatty: wordlist not found: {self.wordlist}")
+                return None
+
+            logger.info(f"cowpatty: cracking {ssid} with {self.wordlist}")
+            start_time = time.time()
+
+            cmd = [
+                'cowpatty',
+                '-f', self.wordlist,
+                '-r', capture_file,
+                '-s', ssid,
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=7200,  # 2-hour cap
+            )
+            crack_time = time.time() - start_time
+
+            if result.returncode not in (0, 1):
+                logger.warning(f"cowpatty: unexpected exit code {result.returncode}: {result.stderr[:200]}")
+                return None
+
+            # cowpatty success: "The PSK is \"<password>\"."
+            for line in result.stdout.splitlines():
+                if line.startswith('The PSK is "'):
+                    password = line[len('The PSK is "'):-2]  # strip trailing "."
+                    logger.info(f"cowpatty: found password: {password}")
+                    return (password, crack_time)
+
+            logger.debug(f"cowpatty: exhausted wordlist for {ssid}")
+            return None
+
+        except FileNotFoundError:
+            logger.warning("cowpatty not installed — skipping. Install: sudo apt install cowpatty")
+            return None
+        except subprocess.TimeoutExpired:
+            logger.warning(f"cowpatty: timeout for {handshake['ssid']}")
+            return None
+        except Exception as e:
+            logger.error(f"cowpatty error: {e}", exc_info=True)
+            return None
+
     def _crack_with_john(self, handshake: Dict) -> Optional[tuple]:
         """Crack password using John the Ripper.
 

@@ -39,7 +39,7 @@
   "cracking": {
     "_comment": "Modern flow is hcxdumptool (capture, in wifi_scanner) -> hcxpcapngtool (convert) -> hashcat -m 22000. aircrack-ng is kept available but is essentially WEP-only in 2026. john is useful as a generic cracker for non-WiFi hashes from enum plugins.",
     "enabled": true,
-    "engines": ["hashcat", "john", "aircrack-ng"],
+    "engines": ["cowpatty", "hashcat", "john", "aircrack-ng"],
     "wordlist_path": "/usr/share/wordlists/rockyou.txt",
     "auto_start_cracking": true,
     "max_concurrent_cracks": 2,
