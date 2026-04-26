@@ -48,12 +48,6 @@ class PasswordCracker:
         self.max_concurrent = config['cracking']['max_concurrent_cracks']
         
         self.john_format = config['cracking']['john_format']
-        self.hashcat_mode = config['cracking']['hashcat_mode']
-        self.hashcat_rules_dir = config['cracking'].get('hashcat_rules_dir', './rules')
-        self.hashcat_use_rules = config['cracking'].get('use_rules', True)
-        self.hashcat_brute_force = config['cracking'].get('brute_force', True)
-        self.hashcat_brute_max_length = config['cracking'].get('brute_max_length', 8)
-        self.session_prefix = config['cracking'].get('session_prefix', 'pendonn')
         
         self.running = False
         self.crack_queue = queue.Queue()
