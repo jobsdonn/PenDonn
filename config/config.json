@@ -69,12 +69,25 @@
     "brightness": 80
   },
   "notifications": {
-    "_comment": "Push notifications via ntfy.sh. Disabled by default. To enable: in config.json.local set notifications.ntfy.enabled=true and notifications.ntfy.topic to a long random string (treat the topic as a shared secret — anyone who knows it can read your notifications). For self-hosted ntfy, also set notifications.ntfy.server. Per-event opt-out via notify_on: {handshake|crack|vulnerability|scan: false}.",
+    "_comment": "Push notifications. Two transports: ntfy.sh (phone push) and generic webhook (Slack/Teams/n8n/your-own-server). Both disabled by default. Easier to configure via WebUI Settings → Notifications than by editing this file. Per-event opt-out via notify_on: {handshake|crack|vulnerability|scan: false}.",
     "ntfy": {
+      "_comment": "ntfy.sh push notifications. Topic is public-by-URL, treat as shared secret. For self-hosted ntfy, set server to your URL.",
       "enabled": false,
       "server": "https://ntfy.sh",
       "topic": "",
       "token": "",
+      "notify_on": {
+        "handshake": true,
+        "crack": true,
+        "vulnerability": true,
+        "scan": true
+      }
+    },
+    "webhook": {
+      "_comment": "Generic webhook — POSTs JSON to any URL. Use for Slack incoming-webhook, Teams workflow, Discord, n8n, or your own endpoint. Custom headers for auth (e.g. {\"Authorization\": \"Bearer ...\"}).",
+      "enabled": false,
+      "url": "",
+      "headers": {},
       "notify_on": {
         "handshake": true,
         "crack": true,

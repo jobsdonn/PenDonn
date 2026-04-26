@@ -129,7 +129,13 @@ Captured handshakes land in `/opt/pendonn/handshakes/` as `<BSSID>_<TIMESTAMP>-0
 
 ## Notifications
 
-PenDonn can push alerts to your phone via [ntfy.sh](https://ntfy.sh) — no account, no app store hoops, just install the official ntfy app and subscribe to your topic. Disabled by default; opt in via `config.json.local`.
+PenDonn can push alerts to your phone (via [ntfy.sh](https://ntfy.sh)) and/or POST a JSON payload to any HTTP endpoint (Slack, Teams, n8n, your own server). Both transports are disabled by default and run in parallel when both are enabled.
+
+**Configure in the WebUI:** Settings → Notifications. The page handles both backends, includes a topic-generator button, and has a "Test notification" button to verify delivery. Settings persist in `config.json.local`.
+
+### ntfy push (phone)
+
+Install the [ntfy app](https://ntfy.sh/app) (Android/iOS/web), subscribe to your topic, then enable in the WebUI or `config.json.local`:
 
 ```json
 {
@@ -140,10 +146,7 @@ PenDonn can push alerts to your phone via [ntfy.sh](https://ntfy.sh) — no acco
       "topic":   "pendonn-<long-random-string>",
       "token":   "",
       "notify_on": {
-        "handshake":     true,
-        "crack":         true,
-        "vulnerability": true,
-        "scan":          true
+        "handshake": true, "crack": true, "vulnerability": true, "scan": true
       }
     }
   }
@@ -159,9 +162,44 @@ Event → ntfy priority mapping:
 | PSK cracked | 4 (high) | Sound + vibrate |
 | Critical/high vulnerability | 5 (urgent) | Bypasses Do Not Disturb on most phones |
 
-**Topic security:** `ntfy.sh` topics are public by URL — anyone who guesses your topic name can read your notifications. Treat the topic string as a shared secret. Use `openssl rand -hex 16` for a unique unguessable name, and keep it in `config.json.local` (untracked) — never in committed defaults.
+**Topic security:** `ntfy.sh` topics are public by URL — anyone who guesses your topic name can read your notifications. Treat the topic string as a shared secret. Use the **Generate** button in the UI (or `openssl rand -hex 16`) for an unguessable name, and keep it in `config.json.local` (untracked) — never in committed defaults.
 
 For sensitive engagements, run a self-hosted ntfy server with auth (`server: "https://ntfy.example.com"`, `token: "tk_..."`).
+
+### Generic webhook
+
+Posts a JSON payload to any URL with optional custom headers:
+
+```json
+{
+  "notifications": {
+    "webhook": {
+      "enabled": true,
+      "url": "https://your-server.example.com/pendonn-events",
+      "headers": { "Authorization": "Bearer ..." },
+      "notify_on": { "handshake": true, "crack": true, "vulnerability": true, "scan": true }
+    }
+  }
+}
+```
+
+Payload shape per event:
+
+```json
+{
+  "event": "crack",
+  "priority": "high",
+  "title": "PSK cracked: Customer-AP",
+  "body": "BSSID AA:BB:CC:DD:EE:FF — cowpatty in 12s",
+  "tags": ["key", "fire"],
+  "data": { "ssid": "Customer-AP", "bssid": "AA:BB:CC:DD:EE:FF",
+            "engine": "cowpatty", "seconds": 12 }
+}
+```
+
+Slack and Teams expect their own incoming-webhook shapes — for those, point this at a small relay (n8n, Cloudflare Worker, or a 20-line Python forwarder) that translates the PenDonn payload into the destination's format.
+
+**Daemon restart needed** for live events to use changed settings — the daemon's long-lived Notifier reads config at startup. The "Test" button uses a fresh Notifier so you can verify a save without bouncing the service.
 
 ## Safety model
 
@@ -201,7 +239,7 @@ pendonn/
 │   ├── config.json                 # tracked defaults
 │   ├── config.example.json         # annotated reference
 │   └── config.rpi_zero2w.json      # single-radio variant
-├── tests/            # 168 unit tests, run with: python -m unittest discover tests
+├── tests/            # 176 unit tests, run with: python -m unittest discover tests
 ├── docs/
 │   ├── SAFETY.md                   # SSH lockout + plugin loader trust model
 │   └── DISPLAY_SETUP.md            # Waveshare wiring + library install
@@ -217,7 +255,7 @@ pendonn/
 python -m venv venv
 . venv/bin/activate                 # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-python -m unittest discover tests   # 168 tests, ~7s on a laptop
+python -m unittest discover tests   # 176 tests, ~7s on a laptop
 ```
 
 POSIX-only tests (e.g. `/proc` walking) are skipped on Windows. The web UI runs locally:

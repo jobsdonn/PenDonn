@@ -1,28 +1,39 @@
 """
 PenDonn notifications.
 
-Push notifications via ntfy.sh (or self-hosted ntfy server) for:
+Push notifications for:
   - Handshake captured
   - PSK cracked
   - Vulnerability found
   - Scan completed
 
+Two transports are supported, each opt-in via config:
+
+  1. **ntfy.sh** (or self-hosted ntfy server) — sends a phone-friendly
+     push via the public ntfy.sh service or a private instance.
+     Headers: Title / Priority / Tags. Plain-text body.
+  2. **Webhook** — POST a JSON payload to any URL, optional custom
+     headers. Use for Slack/Teams/Discord/n8n/your-own-server.
+
+Both backends share semantics: same event types, same priority tiers
+(low/normal/high/urgent), same per-event opt-out. They run in parallel
+when both are enabled.
+
 Design notes:
-  - Fire-and-forget over a daemon thread — never block the main pipeline
-    even if the ntfy server is slow or unreachable.
-  - Config-gated: disabled by default. Enable in config.json.local by
-    setting `notifications.ntfy.enabled = true` and `notifications.ntfy.topic`.
-  - Topic security: ntfy topics are public-by-default. Use a long random
-    topic name and treat it as a shared secret (keep it in config.json.local,
-    never in committed defaults).
-  - Severity tiers map to ntfy priorities so phones can be configured to
-    only buzz on high-priority events.
+  - Fire-and-forget over a daemon thread per backend — never block
+    the main pipeline even if a remote endpoint is slow or unreachable.
+  - Bounded queues drop oldest on overflow; auditing is more
+    valuable than guaranteed delivery for ops alerting.
+  - Disabled by default. Operator turns on individual transports
+    via config.json.local.
 """
 
+import abc
+import json
 import logging
 import threading
 from queue import Queue, Empty
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import urllib.request
 import urllib.error
@@ -30,8 +41,10 @@ import urllib.error
 logger = logging.getLogger(__name__)
 
 
-# ntfy priority levels (1=min, 5=urgent). Mapped from semantic event types.
-_PRIORITY = {
+# Semantic priority -> numeric ntfy priority. Webhook backends get the
+# semantic name as a string field instead, since Slack/Teams/etc don't
+# care about ntfy's 1-5 scale.
+_NTFY_PRIORITY = {
     'low': '2',
     'normal': '3',
     'high': '4',
@@ -39,146 +52,297 @@ _PRIORITY = {
 }
 
 
-class Notifier:
-    """Background notification dispatcher.
+# ---------------------------------------------------------------------------
+# Backend interface
+# ---------------------------------------------------------------------------
 
-    Drops events onto an in-process queue; a worker thread sends them out
-    over HTTP. If the queue ever fills (server down for hours), oldest
-    events are dropped — we'd rather lose a notification than back-pressure
-    the capture/crack pipeline.
-    """
 
-    def __init__(self, config: Dict):
-        ntfy_cfg = config.get('notifications', {}).get('ntfy', {})
-        self.enabled = bool(ntfy_cfg.get('enabled', False))
-        self.server = ntfy_cfg.get('server', 'https://ntfy.sh').rstrip('/')
-        self.topic = ntfy_cfg.get('topic', '').strip()
-        # Optional bearer token for self-hosted ntfy with auth.
-        self.token = ntfy_cfg.get('token', '').strip()
-        # Per-event opt-out: e.g. notify_on = {"handshake": false, ...}
-        self.notify_on = ntfy_cfg.get('notify_on', {})
+class _Backend(abc.ABC):
+    """Each backend owns a thread + queue + delivery loop. Subclasses
+    implement `_deliver(event)` for whatever HTTP shape they need."""
 
-        self._queue: Queue = Queue(maxsize=200)
+    name = "abstract"
+
+    def __init__(self, queue_size: int = 200):
+        self._queue: Queue = Queue(maxsize=queue_size)
         self._stop = threading.Event()
         self._worker: Optional[threading.Thread] = None
 
-        if self.enabled and not self.topic:
-            logger.warning("notifications.ntfy.enabled=true but no topic set — disabling")
-            self.enabled = False
-
-        if self.enabled:
-            self._worker = threading.Thread(
-                target=self._run, name='ntfy-worker', daemon=True
-            )
-            self._worker.start()
-            logger.info(f"Notifier started (server={self.server}, topic=***)")
-        else:
-            logger.info("Notifier disabled (set notifications.ntfy.enabled in config.json.local)")
+    def start(self):
+        self._worker = threading.Thread(
+            target=self._run, name=f"notify-{self.name}", daemon=True,
+        )
+        self._worker.start()
+        logger.info(f"Notification backend started: {self.name}")
 
     def stop(self):
         self._stop.set()
-        # Worker is a daemon thread; no need to join.
+
+    def enqueue(self, event: Dict):
+        try:
+            self._queue.put_nowait(event)
+        except Exception:
+            try:
+                self._queue.get_nowait()
+                self._queue.put_nowait(event)
+            except Exception as e:
+                logger.warning(f"{self.name} queue full, dropping event: {e}")
+
+    @abc.abstractmethod
+    def _deliver(self, event: Dict) -> None:
+        """Send one event over the wire. Should raise on failure so the
+        worker can log it; the worker swallows the exception."""
+
+    def _run(self):
+        while not self._stop.is_set():
+            try:
+                event = self._queue.get(timeout=1.0)
+            except Empty:
+                continue
+            try:
+                self._deliver(event)
+            except urllib.error.URLError as e:
+                logger.warning(f"{self.name} delivery failed: {e}")
+            except Exception as e:
+                logger.warning(f"{self.name} unexpected error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# ntfy backend
+# ---------------------------------------------------------------------------
+
+
+class NtfyBackend(_Backend):
+    name = "ntfy"
+
+    def __init__(self, server: str, topic: str, token: str = ""):
+        super().__init__()
+        self.server = server.rstrip("/")
+        self.topic = topic
+        self.token = token
+
+    def _deliver(self, event: Dict) -> None:
+        url = f"{self.server}/{self.topic}"
+        req = urllib.request.Request(
+            url,
+            data=event["body"].encode("utf-8"),
+            method="POST",
+        )
+        req.add_header("Title", event["title"])
+        req.add_header("Priority", _NTFY_PRIORITY.get(event["priority"], "3"))
+        if event.get("tags"):
+            req.add_header("Tags", event["tags"])
+        if self.token:
+            req.add_header("Authorization", f"Bearer {self.token}")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status >= 400:
+                logger.warning(f"ntfy returned {resp.status} for {event['title']}")
+
+
+# ---------------------------------------------------------------------------
+# Generic webhook backend
+# ---------------------------------------------------------------------------
+
+
+class WebhookBackend(_Backend):
+    """POSTs a JSON payload to a configured URL.
+
+    Payload shape:
+        {
+          "event": "<event_type>",     # handshake|crack|scan|vulnerability|test
+          "priority": "low|normal|high|urgent",
+          "title": "<short summary>",
+          "body": "<longer text>",
+          "tags": ["lock", "fire", ...],
+          "data": { ...event-specific fields... }
+        }
+
+    Custom headers can be set in config (e.g. for bearer auth, Slack
+    incoming-webhook URLs already encode their own auth). Slack/Teams
+    don't read this exact JSON shape — for those, use a relay/n8n flow.
+    """
+    name = "webhook"
+
+    def __init__(self, url: str, headers: Optional[Dict[str, str]] = None):
+        super().__init__()
+        self.url = url
+        self.headers = headers or {}
+
+    def _deliver(self, event: Dict) -> None:
+        payload = json.dumps({
+            "event": event.get("event"),
+            "priority": event.get("priority"),
+            "title": event.get("title"),
+            "body": event.get("body"),
+            "tags": (event.get("tags") or "").split(",") if event.get("tags") else [],
+            "data": event.get("data") or {},
+        }).encode("utf-8")
+        req = urllib.request.Request(self.url, data=payload, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("User-Agent", "PenDonn/1.0")
+        for k, v in self.headers.items():
+            req.add_header(k, v)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status >= 400:
+                logger.warning(f"webhook returned {resp.status} for {event.get('title')}")
+
+
+# ---------------------------------------------------------------------------
+# Notifier — public surface
+# ---------------------------------------------------------------------------
+
+
+class Notifier:
+    """Multi-backend dispatcher. Disabled by default; backends are added
+    based on `notifications.<name>.enabled` flags in config."""
+
+    def __init__(self, config: Dict):
+        notif_cfg = config.get("notifications", {}) or {}
+        self.backends: List[_Backend] = []
+        self.notify_on: Dict[str, bool] = {}
+
+        # Pull a unified per-event opt-out. Either backend's notify_on
+        # works; if both set, ntfy wins (first-loaded; in practice they
+        # should match because the operator usually only changes one UI).
+        ntfy_cfg = notif_cfg.get("ntfy", {}) or {}
+        webhook_cfg = notif_cfg.get("webhook", {}) or {}
+
+        if ntfy_cfg.get("enabled") and ntfy_cfg.get("topic"):
+            backend = NtfyBackend(
+                server=ntfy_cfg.get("server", "https://ntfy.sh"),
+                topic=ntfy_cfg.get("topic", "").strip(),
+                token=ntfy_cfg.get("token", "").strip(),
+            )
+            backend.start()
+            self.backends.append(backend)
+            self.notify_on = ntfy_cfg.get("notify_on", {}) or {}
+        elif ntfy_cfg.get("enabled"):
+            logger.warning(
+                "notifications.ntfy.enabled=true but no topic set — "
+                "ntfy backend disabled"
+            )
+
+        if webhook_cfg.get("enabled") and webhook_cfg.get("url"):
+            backend = WebhookBackend(
+                url=webhook_cfg.get("url", "").strip(),
+                headers=webhook_cfg.get("headers", {}) or {},
+            )
+            backend.start()
+            self.backends.append(backend)
+            # Webhook notify_on overrides only if ntfy didn't set it.
+            if not self.notify_on:
+                self.notify_on = webhook_cfg.get("notify_on", {}) or {}
+        elif webhook_cfg.get("enabled"):
+            logger.warning(
+                "notifications.webhook.enabled=true but no url set — "
+                "webhook backend disabled"
+            )
+
+        if not self.backends:
+            logger.info(
+                "Notifications disabled (no enabled+configured backends). "
+                "Configure in WebUI Settings → Notifications, or in "
+                "config.json.local."
+            )
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.backends)
+
+    def stop(self):
+        for b in self.backends:
+            b.stop()
 
     # ---------- semantic event helpers ----------
 
     def handshake_captured(self, ssid: str, bssid: str):
-        if not self._allowed('handshake'):
+        if not self._allowed("handshake"):
             return
-        self._enqueue(
-            title=f"Handshake captured: {ssid}",
-            body=f"BSSID {bssid}",
-            priority='low',
-            tags=['lock'],
-        )
+        self._fanout({
+            "event": "handshake",
+            "title": f"Handshake captured: {ssid}",
+            "body": f"BSSID {bssid}",
+            "priority": "low",
+            "tags": "lock",
+            "data": {"ssid": ssid, "bssid": bssid},
+        })
 
     def password_cracked(self, ssid: str, bssid: str, engine: str, seconds: int):
-        if not self._allowed('crack'):
+        if not self._allowed("crack"):
             return
-        self._enqueue(
-            title=f"PSK cracked: {ssid}",
-            body=f"BSSID {bssid} — {engine} in {seconds}s",
-            priority='high',
-            tags=['key', 'fire'],
-        )
+        self._fanout({
+            "event": "crack",
+            "title": f"PSK cracked: {ssid}",
+            "body": f"BSSID {bssid} — {engine} in {seconds}s",
+            "priority": "high",
+            "tags": "key,fire",
+            "data": {"ssid": ssid, "bssid": bssid, "engine": engine,
+                     "seconds": seconds},
+        })
 
     def vulnerability_found(self, ssid: str, host: str, severity: str,
-                            vuln_type: str, description: str = ''):
-        if not self._allowed('vulnerability'):
+                            vuln_type: str, description: str = ""):
+        if not self._allowed("vulnerability"):
             return
-        sev = (severity or '').lower()
-        prio = 'urgent' if sev == 'critical' else ('high' if sev == 'high' else 'normal')
+        sev = (severity or "").lower()
+        prio = "urgent" if sev == "critical" else (
+            "high" if sev == "high" else "normal"
+        )
         body = f"{host} — {vuln_type}"
         if description:
             body += f"\n{description[:200]}"
-        self._enqueue(
-            title=f"[{sev or 'vuln'}] {ssid}",
-            body=body,
-            priority=prio,
-            tags=['warning'] if sev in ('critical', 'high') else ['mag'],
-        )
+        self._fanout({
+            "event": "vulnerability",
+            "title": f"[{sev or 'vuln'}] {ssid}",
+            "body": body,
+            "priority": prio,
+            "tags": "warning" if sev in ("critical", "high") else "mag",
+            "data": {"ssid": ssid, "host": host, "severity": sev,
+                     "vuln_type": vuln_type, "description": description},
+        })
 
     def scan_completed(self, ssid: str, hosts: int, vulns: int):
-        if not self._allowed('scan'):
+        if not self._allowed("scan"):
             return
-        self._enqueue(
-            title=f"Scan complete: {ssid}",
-            body=f"{hosts} host{'s' if hosts != 1 else ''}, {vulns} vuln{'s' if vulns != 1 else ''}",
-            priority='normal',
-            tags=['white_check_mark'],
-        )
+        self._fanout({
+            "event": "scan",
+            "title": f"Scan complete: {ssid}",
+            "body": f"{hosts} host{'s' if hosts != 1 else ''}, "
+                    f"{vulns} vuln{'s' if vulns != 1 else ''}",
+            "priority": "normal",
+            "tags": "white_check_mark",
+            "data": {"ssid": ssid, "hosts": hosts, "vulnerabilities": vulns},
+        })
+
+    def send_test(self, source: str = "manual") -> bool:
+        """Fire a one-shot test event through every enabled backend.
+        Returns True if at least one backend was active to receive it.
+        Bypasses notify_on so the test always goes through."""
+        if not self.backends:
+            return False
+        self._fanout_unfiltered({
+            "event": "test",
+            "title": "PenDonn notification test",
+            "body": f"Test fired from {source}. If you see this, the channel works.",
+            "priority": "normal",
+            "tags": "test_tube",
+            "data": {"source": source},
+        })
+        return True
 
     # ---------- internals ----------
 
     def _allowed(self, kind: str) -> bool:
-        if not self.enabled:
+        if not self.backends:
             return False
-        # Default to True for unspecified kinds; explicit false opts out.
         return self.notify_on.get(kind, True) is not False
 
-    def _enqueue(self, title: str, body: str, priority: str, tags):
-        try:
-            self._queue.put_nowait({
-                'title': title,
-                'body': body,
-                'priority': _PRIORITY.get(priority, '3'),
-                'tags': ','.join(tags) if tags else '',
-            })
-        except Exception:
-            # Queue full — drop oldest, push new.
-            try:
-                self._queue.get_nowait()
-                self._queue.put_nowait({
-                    'title': title, 'body': body,
-                    'priority': _PRIORITY.get(priority, '3'),
-                    'tags': ','.join(tags) if tags else '',
-                })
-            except Exception as e:
-                logger.warning(f"Notifier queue full, dropping event: {e}")
+    def _fanout(self, event: Dict):
+        for b in self.backends:
+            b.enqueue(event)
 
-    def _run(self):
-        url = f"{self.server}/{self.topic}"
-        while not self._stop.is_set():
-            try:
-                msg = self._queue.get(timeout=1.0)
-            except Empty:
-                continue
-
-            try:
-                req = urllib.request.Request(
-                    url,
-                    data=msg['body'].encode('utf-8'),
-                    method='POST',
-                )
-                req.add_header('Title', msg['title'])
-                req.add_header('Priority', msg['priority'])
-                if msg['tags']:
-                    req.add_header('Tags', msg['tags'])
-                if self.token:
-                    req.add_header('Authorization', f'Bearer {self.token}')
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    if resp.status >= 400:
-                        logger.warning(f"ntfy returned {resp.status} for {msg['title']}")
-            except urllib.error.URLError as e:
-                logger.warning(f"ntfy delivery failed: {e}")
-            except Exception as e:
-                logger.warning(f"ntfy unexpected error: {e}")
+    def _fanout_unfiltered(self, event: Dict):
+        # Skip notify_on filter — used by test button so the operator
+        # can verify a backend even if a specific event type is muted.
+        for b in self.backends:
+            b.enqueue(event)

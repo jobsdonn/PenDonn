@@ -89,6 +89,8 @@ def settings_page(request: Request, username: str = Depends(require_login)):
     }
     # Scope partial needs its own context keys (active, confirmed, missing_ssids, ...)
     ctx.update(_scope_status(request))
+    # Notifications partial expects ntfy/webhook dicts.
+    ctx.update(_notifications_status(request))
     return request.app.state.templates.TemplateResponse(
         request, "settings.html", ctx,
     )
@@ -339,4 +341,207 @@ def scope_revoke(request: Request, username: str = Depends(require_login)):
         )
     return request.app.state.templates.TemplateResponse(
         request, "partials/scope.html", _scope_status(request),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Notifications config (ntfy + webhook)
+# ---------------------------------------------------------------------------
+
+
+def _notifications_status(request: Request) -> Dict[str, Any]:
+    """Pull current notifications config for the partial. Reads from the
+    live merged config (config.json + config.json.local overlay)."""
+    cfg = request.app.state.config
+    notif = (cfg.get("notifications") or {})
+    ntfy = notif.get("ntfy", {}) or {}
+    webhook = notif.get("webhook", {}) or {}
+    return {
+        "ntfy": {
+            "enabled": bool(ntfy.get("enabled", False)),
+            "server": ntfy.get("server", "https://ntfy.sh"),
+            "topic": ntfy.get("topic", ""),
+            "token_set": bool(ntfy.get("token")),
+            "notify_on": ntfy.get("notify_on", {}) or {},
+        },
+        "webhook": {
+            "enabled": bool(webhook.get("enabled", False)),
+            "url": webhook.get("url", ""),
+            "headers_count": len((webhook.get("headers") or {})),
+            "notify_on": webhook.get("notify_on", {}) or {},
+        },
+    }
+
+
+def _persist_notifications(request: Request, ntfy: Dict, webhook: Dict) -> None:
+    """Write notifications.{ntfy,webhook} to config.json.local without
+    clobbering other overlay keys. Mirrors to live in-memory config."""
+    overlay_path = local_overlay_path(request.app.state.config_path)
+    overlay: Dict[str, Any] = {}
+    if os.path.isfile(overlay_path):
+        try:
+            with open(overlay_path, "r", encoding="utf-8") as f:
+                overlay = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            overlay = {}
+    notif = overlay.setdefault("notifications", {})
+    notif["ntfy"] = ntfy
+    notif["webhook"] = webhook
+    _atomic_write_local(overlay_path, overlay)
+
+    cfg = request.app.state.config
+    live_notif = cfg.setdefault("notifications", {})
+    live_notif["ntfy"] = ntfy
+    live_notif["webhook"] = webhook
+
+
+_NTFY_TOPIC_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+_HTTPS_URL_RE = re.compile(r"^https?://[^\s]+$")
+
+
+@router.get("/partials/notifications")
+def notifications_partial(request: Request, username: str = Depends(require_login)):
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "partials/notifications.html",
+        _notifications_status(request),
+    )
+
+
+@router.post("/partials/notifications/save")
+def notifications_save(
+    request: Request,
+    # ntfy fields
+    ntfy_enabled: str = Form(""),
+    ntfy_server: str = Form("https://ntfy.sh"),
+    ntfy_topic: str = Form(""),
+    ntfy_token: str = Form(""),
+    ntfy_on_handshake: str = Form(""),
+    ntfy_on_crack: str = Form(""),
+    ntfy_on_vulnerability: str = Form(""),
+    ntfy_on_scan: str = Form(""),
+    # webhook fields
+    wh_enabled: str = Form(""),
+    wh_url: str = Form(""),
+    wh_headers: str = Form(""),  # JSON string {"Header": "value"}
+    wh_on_handshake: str = Form(""),
+    wh_on_crack: str = Form(""),
+    wh_on_vulnerability: str = Form(""),
+    wh_on_scan: str = Form(""),
+    username: str = Depends(require_login),
+):
+    """Save notifications config from the settings UI. Validates topic
+    and URL formats; refuses to enable a backend that's misconfigured."""
+    cfg = request.app.state.config
+    cur = cfg.get("notifications") or {}
+
+    def _on(v: str) -> bool:
+        return v.lower() in ("1", "true", "on", "yes")
+
+    # ----- ntfy -----
+    ntfy_topic = ntfy_topic.strip()
+    ntfy_server = (ntfy_server or "").strip() or "https://ntfy.sh"
+    ntfy_token_new = ntfy_token.strip()
+    if ntfy_topic and not _NTFY_TOPIC_RE.match(ntfy_topic):
+        raise HTTPException(
+            status_code=400,
+            detail="ntfy topic must be 6-64 chars, alphanumeric + - / _",
+        )
+    if not _HTTPS_URL_RE.match(ntfy_server):
+        raise HTTPException(status_code=400, detail="ntfy server must be http(s):// URL")
+    # Empty token form value means "keep existing" (so the operator
+    # doesn't have to re-enter it on every save).
+    keep_token = (cur.get("ntfy", {}) or {}).get("token", "")
+    ntfy_block = {
+        "enabled": _on(ntfy_enabled),
+        "server": ntfy_server,
+        "topic": ntfy_topic,
+        "token": ntfy_token_new if ntfy_token_new else keep_token,
+        "notify_on": {
+            "handshake": _on(ntfy_on_handshake),
+            "crack": _on(ntfy_on_crack),
+            "vulnerability": _on(ntfy_on_vulnerability),
+            "scan": _on(ntfy_on_scan),
+        },
+    }
+    if ntfy_block["enabled"] and not ntfy_block["topic"]:
+        raise HTTPException(status_code=400, detail="ntfy enabled but topic empty")
+
+    # ----- webhook -----
+    wh_url_clean = (wh_url or "").strip()
+    if wh_url_clean and not _HTTPS_URL_RE.match(wh_url_clean):
+        raise HTTPException(status_code=400, detail="webhook URL must be http(s)://")
+    wh_headers_obj: Dict[str, str] = {}
+    if wh_headers and wh_headers.strip():
+        try:
+            parsed = json.loads(wh_headers)
+            if not isinstance(parsed, dict):
+                raise ValueError("not a dict")
+            wh_headers_obj = {str(k): str(v) for k, v in parsed.items()}
+        except (json.JSONDecodeError, ValueError) as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"webhook headers must be a JSON object: {e}",
+            )
+    wh_block = {
+        "enabled": _on(wh_enabled),
+        "url": wh_url_clean,
+        "headers": wh_headers_obj,
+        "notify_on": {
+            "handshake": _on(wh_on_handshake),
+            "crack": _on(wh_on_crack),
+            "vulnerability": _on(wh_on_vulnerability),
+            "scan": _on(wh_on_scan),
+        },
+    }
+    if wh_block["enabled"] and not wh_block["url"]:
+        raise HTTPException(status_code=400, detail="webhook enabled but url empty")
+
+    _persist_notifications(request, ntfy_block, wh_block)
+
+    request.app.state.db.add_audit_log(
+        action="notifications.update",
+        actor=username,
+        details={
+            "ntfy_enabled": ntfy_block["enabled"],
+            "webhook_enabled": wh_block["enabled"],
+        },
+        source_ip=_client_ip(request),
+    )
+
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "partials/notifications.html",
+        _notifications_status(request),
+    )
+
+
+@router.post("/partials/notifications/test")
+def notifications_test(request: Request, username: str = Depends(require_login)):
+    """Fire a one-shot test event through every enabled backend.
+
+    Builds a fresh Notifier from the live (saved) config so the operator
+    sees the effect of their last save without restarting the daemon —
+    the daemon's long-lived Notifier won't pick up changes until restart,
+    but for the test we instantiate a temporary one.
+    """
+    from core.notifications import Notifier  # local import keeps webui import light
+
+    cfg = request.app.state.config
+    n = Notifier(cfg)
+    sent = n.send_test(source=f"webui:{username}")
+    n.stop()
+
+    request.app.state.db.add_audit_log(
+        action="notifications.test",
+        actor=username,
+        details={"any_backend_active": sent},
+        source_ip=_client_ip(request),
+    )
+
+    msg = "Test fired" if sent else "No backend enabled — nothing sent"
+    ctx = _notifications_status(request)
+    ctx["test_message"] = msg
+    return request.app.state.templates.TemplateResponse(
+        request, "partials/notifications.html", ctx,
     )

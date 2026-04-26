@@ -1,0 +1,172 @@
+{# Notifications config (ntfy + generic webhook).
+
+   Two transports, opt-in, run in parallel. Saving via this form
+   writes to config.json.local and updates the in-memory config —
+   the daemon's long-lived Notifier picks up changes on next restart.
+   The "Test" button instantiates a fresh Notifier from current config
+   so the operator can verify a backend without bouncing the service. #}
+
+<div id="notifications" x-data="{
+        showNtfyToken: false,
+        genTopic() {
+            const r = (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).replace(/[^a-z0-9]/g, '').slice(0, 24);
+            this.$refs.ntfyTopic.value = 'pendonn-' + r;
+        }
+    }" class="space-y-6">
+
+    {% if test_message %}
+    <div class="rounded-md border border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950/30 px-3 py-2 text-xs text-sky-800 dark:text-sky-200">
+        {{ test_message }}
+    </div>
+    {% endif %}
+
+    <form hx-post="/partials/notifications/save"
+          hx-target="#notifications"
+          hx-swap="outerHTML"
+          class="space-y-6">
+
+        {# ---- ntfy ---- #}
+        <fieldset class="space-y-3 border border-slate-200 dark:border-ink-700 rounded-lg p-4">
+            <legend class="px-2 -ml-2 text-sm font-semibold flex items-center gap-2">
+                <span class="inline-block w-2 h-2 rounded-full {% if ntfy.enabled %}bg-ok{% else %}bg-slate-300 dark:bg-ink-600{% endif %}"></span>
+                ntfy push notifications
+            </legend>
+
+            <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="ntfy_enabled" value="1"
+                       {% if ntfy.enabled %}checked{% endif %}
+                       class="rounded border-slate-300 dark:border-ink-600 text-accent-deep focus:ring-accent">
+                Enable ntfy
+            </label>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                    <label class="text-xs text-slate-600 dark:text-slate-400">Server</label>
+                    <input type="url" name="ntfy_server" value="{{ ntfy.server }}"
+                           class="w-full mt-0.5 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm">
+                    <p class="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">
+                        Default <code>https://ntfy.sh</code>. Override for self-hosted.
+                    </p>
+                </div>
+                <div>
+                    <label class="text-xs text-slate-600 dark:text-slate-400">Topic</label>
+                    <div class="flex gap-2 mt-0.5">
+                        <input type="text" name="ntfy_topic" x-ref="ntfyTopic"
+                               value="{{ ntfy.topic }}" placeholder="pendonn-<random>"
+                               pattern="[A-Za-z0-9_-]{6,64}"
+                               class="flex-1 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm font-mono">
+                        <button type="button" @click="genTopic()"
+                                class="shrink-0 px-2 py-1.5 text-xs rounded bg-slate-100 dark:bg-ink-800 hover:bg-slate-200 dark:hover:bg-ink-700"
+                                title="Generate a long random topic">
+                            Generate
+                        </button>
+                    </div>
+                    <p class="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">
+                        Public-by-URL. Use the Generate button — anyone who knows the topic can read your alerts.
+                    </p>
+                </div>
+            </div>
+
+            <div>
+                <label class="text-xs text-slate-600 dark:text-slate-400">
+                    Bearer token (self-hosted ntfy with auth)
+                </label>
+                <div class="flex gap-2 mt-0.5">
+                    <input :type="showNtfyToken ? 'text' : 'password'"
+                           name="ntfy_token"
+                           placeholder="{{ 'tk_• • • (set; leave blank to keep)' if ntfy.token_set else '(optional)' }}"
+                           class="flex-1 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm font-mono">
+                    <button type="button" @click="showNtfyToken = !showNtfyToken"
+                            class="px-2 text-xs rounded bg-slate-100 dark:bg-ink-800 hover:bg-slate-200 dark:hover:bg-ink-700">
+                        <span x-show="!showNtfyToken">Show</span><span x-show="showNtfyToken">Hide</span>
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                <div class="text-xs text-slate-600 dark:text-slate-400 mb-1">Send notifications for:</div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    {% for key, label in [('handshake', 'Handshakes'), ('crack', 'PSK cracks'), ('vulnerability', 'Vulns'), ('scan', 'Scan complete')] %}
+                    <label class="flex items-center gap-1.5">
+                        <input type="checkbox" name="ntfy_on_{{ key }}" value="1"
+                               {% if ntfy.notify_on.get(key, True) %}checked{% endif %}
+                               class="rounded border-slate-300 dark:border-ink-600 text-accent-deep focus:ring-accent">
+                        {{ label }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+        </fieldset>
+
+        {# ---- generic webhook ---- #}
+        <fieldset class="space-y-3 border border-slate-200 dark:border-ink-700 rounded-lg p-4">
+            <legend class="px-2 -ml-2 text-sm font-semibold flex items-center gap-2">
+                <span class="inline-block w-2 h-2 rounded-full {% if webhook.enabled %}bg-ok{% else %}bg-slate-300 dark:bg-ink-600{% endif %}"></span>
+                Generic webhook
+            </legend>
+
+            <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="wh_enabled" value="1"
+                       {% if webhook.enabled %}checked{% endif %}
+                       class="rounded border-slate-300 dark:border-ink-600 text-accent-deep focus:ring-accent">
+                Enable webhook
+            </label>
+
+            <div>
+                <label class="text-xs text-slate-600 dark:text-slate-400">Webhook URL</label>
+                <input type="url" name="wh_url" value="{{ webhook.url }}"
+                       placeholder="https://hooks.slack.com/services/... or https://your-server/webhook"
+                       class="w-full mt-0.5 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm font-mono">
+                <p class="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">
+                    PenDonn POSTs JSON: <code>{event, priority, title, body, tags, data}</code>.
+                    Slack/Teams expect their own shape — use n8n, a relay, or a translator endpoint.
+                </p>
+            </div>
+
+            <div>
+                <label class="text-xs text-slate-600 dark:text-slate-400">
+                    Custom headers (JSON object)
+                </label>
+                <textarea name="wh_headers"
+                          rows="3"
+                          placeholder='{"Authorization": "Bearer ...", "X-PenDonn": "1"}'
+                          class="w-full mt-0.5 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-xs font-mono"></textarea>
+                <p class="text-[11px] text-slate-500 dark:text-slate-500 mt-0.5">
+                    Leave empty to keep existing ({{ webhook.headers_count }} header{{ 's' if webhook.headers_count != 1 }} currently set).
+                    Submit <code>{}</code> to clear.
+                </p>
+            </div>
+
+            <div>
+                <div class="text-xs text-slate-600 dark:text-slate-400 mb-1">Send for:</div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    {% for key, label in [('handshake', 'Handshakes'), ('crack', 'PSK cracks'), ('vulnerability', 'Vulns'), ('scan', 'Scan complete')] %}
+                    <label class="flex items-center gap-1.5">
+                        <input type="checkbox" name="wh_on_{{ key }}" value="1"
+                               {% if webhook.notify_on.get(key, True) %}checked{% endif %}
+                               class="rounded border-slate-300 dark:border-ink-600 text-accent-deep focus:ring-accent">
+                        {{ label }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+        </fieldset>
+
+        <div class="flex items-center gap-2">
+            <button type="submit"
+                    class="px-3 py-1.5 rounded-md bg-accent-deep text-white text-sm font-medium hover:bg-sky-600">
+                Save
+            </button>
+            <button type="button"
+                    hx-post="/partials/notifications/test"
+                    hx-target="#notifications"
+                    hx-swap="outerHTML"
+                    class="px-3 py-1.5 rounded-md bg-slate-100 dark:bg-ink-800 hover:bg-slate-200 dark:hover:bg-ink-700 text-sm font-medium">
+                Test notification
+            </button>
+            <span class="text-[11px] text-slate-500 dark:text-slate-500 ml-auto">
+                Daemon picks up changes on next restart. Test button uses live config.
+            </span>
+        </div>
+    </form>
+</div>
