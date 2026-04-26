@@ -310,7 +310,7 @@ class PDFReport:
         spacer(2*mm)
         row(Paragraph('Classification: CONFIDENTIAL', self.ST['CoverMeta']))
         spacer(2*mm)
-        row(Paragraph('Authorized pentest — Kjell &amp; Company', self.ST['CoverMeta']))
+        row(Paragraph('Authorized penetration test', self.ST['CoverMeta']))
 
     # ------------------------------------------------------------------
     # Executive summary

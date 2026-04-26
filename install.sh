@@ -100,6 +100,7 @@ EOF
 echo -e "${NC}"
 
 read -p "Do you understand and agree? (yes/no): " agreement
+agreement=$(echo "$agreement" | tr '[:upper:]' '[:lower:]')
 if [ "$agreement" != "yes" ]; then
     echo -e "${RED}Installation aborted.${NC}"
     exit 1
@@ -424,9 +425,6 @@ if [ -z "$SCRIPT_DIR" ] || [ ! -f "$SCRIPT_DIR/requirements.txt" ]; then
     exit 1
 fi
 
-echo -e "${BLUE}Source directory: $SCRIPT_DIR${NC}"
-echo -e "${BLUE}Target directory: $INSTALL_DIR${NC}"
-
 # Idempotent install: NEVER touch operator data on re-run.
 #
 # The earlier backup-to-/tmp + rm -rf + restore dance was fragile (any
@@ -503,101 +501,19 @@ echo -e "${YELLOW}Installing packages from requirements.txt...${NC}"
 pip install -r requirements.txt
 print_success "Python dependencies installed"
 
-# Install Waveshare E-Paper display library
-print_status "Installing Waveshare E-Paper display library..."
-cd /tmp
-if [ -d "e-Paper" ]; then
-    rm -rf e-Paper
-fi
-
-if git clone --depth 1 https://github.com/waveshare/e-Paper.git 2>&1 | grep -v "^Cloning"; then
-    if [ -d "e-Paper/RaspberryPi_JetsonNano/python" ]; then
-        cd e-Paper/RaspberryPi_JetsonNano/python
-        
-        # Copy library to system location for both venv and system Python
-        print_status "Copying Waveshare library to /usr/local/lib..."
-        mkdir -p /usr/local/lib/python3/dist-packages
-        if [ -d "lib/waveshare_epd" ]; then
-            # Show what we're about to copy
-            echo -e "${BLUE}Files in source lib/waveshare_epd:${NC}"
-            ls -la lib/waveshare_epd/ | grep epd7 | head -n 5
-            
-            # Copy the entire waveshare_epd package directory
-            cp -r lib/waveshare_epd /usr/local/lib/python3/dist-packages/
-            
-            # Also create symbolic link for backward compatibility
-            mkdir -p /usr/local/lib/waveshare_epd
-            cp -r lib/waveshare_epd/* /usr/local/lib/waveshare_epd/
-            
-            # Verify __init__.py exists
-            if [ -f "/usr/local/lib/python3/dist-packages/waveshare_epd/__init__.py" ]; then
-                print_success "Waveshare library files copied with package structure"
-            else
-                print_warning "Waveshare __init__.py not found - import may fail"
-            fi
-        else
-            print_error "Waveshare library source not found at lib/waveshare_epd"
-        fi
-        
-        # Install into virtual environment's site-packages
-        print_status "Installing Waveshare library into virtual environment..."
-        source "$INSTALL_DIR/venv/bin/activate"
-        
-        # Get venv site-packages directory
-        VENV_SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])")
-        print_status "Target directory: $VENV_SITE_PACKAGES"
-        
-        if [ -d "lib/waveshare_epd" ]; then
-            # Copy the entire package directory (don't pipe to head - it kills the copy!)
-            print_status "Copying waveshare_epd package..."
-            cp -r lib/waveshare_epd "$VENV_SITE_PACKAGES/" 2>&1 | tail -n 3
-            
-            # Verify files were copied
-            if [ -f "$VENV_SITE_PACKAGES/waveshare_epd/__init__.py" ]; then
-                # Check if __init__.py is empty (common issue)
-                if [ ! -s "$VENV_SITE_PACKAGES/waveshare_epd/__init__.py" ]; then
-                    print_status "Creating minimal __init__.py..."
-                    echo '# Waveshare EPD Library' > "$VENV_SITE_PACKAGES/waveshare_epd/__init__.py"
-                fi
-                print_success "Waveshare library copied to venv site-packages"
-                
-                # Verify epd7in3e.py was copied
-                if [ -f "$VENV_SITE_PACKAGES/waveshare_epd/epd7in3e.py" ]; then
-                    print_success "✓ epd7in3e.py found!"
-                    print_success "✓ Waveshare display library installed"
-                    print_status "Note: Display requires GPIO access and will initialize when service runs"
-                else
-                    print_error "✗ epd7in3e.py NOT copied! Check disk space and permissions"
-                    print_warning "Display will use simulation mode"
-                fi
-            else
-                print_error "Failed to copy Waveshare files to $VENV_SITE_PACKAGES"
-            fi
-        else
-            print_error "Waveshare library source not found at lib/waveshare_epd"
-            print_error "Current directory: $(pwd)"
-            ls -la lib/ 2>&1 | head -n 10
-        fi
-        
-        deactivate
-        
-        cd /tmp
-        rm -rf e-Paper
-    else
-        print_warning "Waveshare library structure unexpected, skipping"
-    fi
-else
-    print_warning "Could not download Waveshare library (display will use simulation mode)"
-fi
-
-cd "$INSTALL_DIR"
-
 # Download rockyou wordlist
 print_status "Downloading rockyou.txt wordlist (140MB, may take a while)..."
 mkdir -p /usr/share/wordlists
 if [ ! -f /usr/share/wordlists/rockyou.txt ]; then
-    wget --progress=bar:force https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt -O /usr/share/wordlists/rockyou.txt
-    print_success "Rockyou wordlist downloaded"
+    if wget --progress=bar:force https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt \
+            -O /usr/share/wordlists/rockyou.txt 2>/dev/null; then
+        print_success "Rockyou wordlist downloaded"
+    else
+        rm -f /usr/share/wordlists/rockyou.txt
+        print_warning "Rockyou download failed (network issue or URL changed)."
+        print_warning "Install manually later: wget <url> -O /usr/share/wordlists/rockyou.txt"
+        print_warning "Cracking will work once rockyou.txt is in place."
+    fi
 else
     print_success "Rockyou wordlist already exists"
 fi
@@ -833,36 +749,33 @@ if [ "$CONFIGURE_NOW" = "yes" ]; then
             fi
         done
         
-        # Management interface (default to onboard if found, otherwise last interface)
-        if [ -n "$ONBOARD_IDX" ]; then
-            read -p "Select MANAGEMENT interface (1-$INTERFACE_COUNT) [$ONBOARD_IDX (onboard WiFi - keeps SSH)]: " MGMT_CHOICE
-            MGMT_CHOICE=${MGMT_CHOICE:-$ONBOARD_IDX}
-        else
-            read -p "Select MANAGEMENT interface (1-$INTERFACE_COUNT) [$INTERFACE_COUNT (last interface)]: " MGMT_CHOICE
-            MGMT_CHOICE=${MGMT_CHOICE:-$INTERFACE_COUNT}
-        fi
-        MGMT_IFACE=${INTERFACES[$((MGMT_CHOICE-1))]}
-        
-        # Monitor interface (default to first USB adapter)
-        read -p "Select MONITOR interface (1-$INTERFACE_COUNT) [1 (scanning)]: " MON_CHOICE
-        MON_CHOICE=${MON_CHOICE:-1}
-        MON_IFACE=${INTERFACES[$((MON_CHOICE-1))]}
-        
-        # Attack interface (default to second USB adapter)
-        read -p "Select ATTACK interface (1-$INTERFACE_COUNT) [2 (handshakes)]: " ATK_CHOICE
-        ATK_CHOICE=${ATK_CHOICE:-2}
-        ATK_IFACE=${INTERFACES[$((ATK_CHOICE-1))]}
-        
-        # Validate that all three interfaces are different
-        if [ "$MGMT_IFACE" = "$MON_IFACE" ] || [ "$MGMT_IFACE" = "$ATK_IFACE" ] || [ "$MON_IFACE" = "$ATK_IFACE" ]; then
-            print_error "ERROR: You must select three DIFFERENT interfaces!"
-            echo "  Management: $MGMT_IFACE"
-            echo "  Monitor:    $MON_IFACE"
-            echo "  Attack:     $ATK_IFACE"
-            echo ""
-            echo "Please run the installer again and select different interfaces."
-            exit 1
-        fi
+        # Interface selection loop — re-prompts on duplicate choice
+        while true; do
+            if [ -n "$ONBOARD_IDX" ]; then
+                read -p "Select MANAGEMENT interface (1-$INTERFACE_COUNT) [$ONBOARD_IDX (onboard WiFi - keeps SSH)]: " MGMT_CHOICE
+                MGMT_CHOICE=${MGMT_CHOICE:-$ONBOARD_IDX}
+            else
+                read -p "Select MANAGEMENT interface (1-$INTERFACE_COUNT) [$INTERFACE_COUNT (last interface)]: " MGMT_CHOICE
+                MGMT_CHOICE=${MGMT_CHOICE:-$INTERFACE_COUNT}
+            fi
+            MGMT_IFACE=${INTERFACES[$((MGMT_CHOICE-1))]}
+
+            read -p "Select MONITOR interface   (1-$INTERFACE_COUNT) [1 (scanning)]: " MON_CHOICE
+            MON_CHOICE=${MON_CHOICE:-1}
+            MON_IFACE=${INTERFACES[$((MON_CHOICE-1))]}
+
+            read -p "Select ATTACK interface    (1-$INTERFACE_COUNT) [2 (handshakes)]: " ATK_CHOICE
+            ATK_CHOICE=${ATK_CHOICE:-2}
+            ATK_IFACE=${INTERFACES[$((ATK_CHOICE-1))]}
+
+            if [ "$MGMT_IFACE" = "$MON_IFACE" ] || [ "$MGMT_IFACE" = "$ATK_IFACE" ] || [ "$MON_IFACE" = "$ATK_IFACE" ]; then
+                print_error "All three interfaces must be different. Please select again."
+                echo "  Management: $MGMT_IFACE  Monitor: $MON_IFACE  Attack: $ATK_IFACE"
+                echo ""
+                continue
+            fi
+            break
+        done
         
         echo ""
         echo -e "${GREEN}Selected interfaces:${NC}"
@@ -947,31 +860,57 @@ print(f'Allowlist: strict=true, {len(ssids)} SSID(s)')
 
     echo ""
 
-    # Web Interface Configuration
-    echo -e "${BLUE}[3/5] Web Interface Configuration${NC}"
+    # Web Interface Configuration + Auth
+    echo -e "${BLUE}[3/5] Web Interface & Authentication${NC}"
     read -p "Enter web interface port [8081]: " WEB_PORT
     WEB_PORT=${WEB_PORT:-8081}
-    
-    # Generate random secret key
+
+    echo ""
+    echo -e "${YELLOW}Set login credentials for the web UI:${NC}"
+    read -p "Username [admin]: " WEB_USER
+    WEB_USER=${WEB_USER:-admin}
+
+    while true; do
+        read -s -p "Password (min 8 chars): " WEB_PASS
+        echo ""
+        read -s -p "Confirm password:        " WEB_PASS2
+        echo ""
+        if [ "$WEB_PASS" != "$WEB_PASS2" ]; then
+            print_error "Passwords do not match — try again"
+            continue
+        fi
+        if [ "${#WEB_PASS}" -lt 8 ]; then
+            print_error "Password must be at least 8 characters"
+            continue
+        fi
+        break
+    done
+
+    # Generate random secret key + hash password via env vars (safe against special chars)
     SECRET_KEY=$(openssl rand -hex 32)
-    
-    # Update .local with Python
+    WEB_PASS="$WEB_PASS" WEB_USER="$WEB_USER" \
     $INSTALL_DIR/venv/bin/python3 -c "
 import json, os
+from werkzeug.security import generate_password_hash
+pw   = os.environ['WEB_PASS']
+user = os.environ['WEB_USER']
 local = '$LOCAL_FILE'
 overlay = json.load(open(local)) if os.path.isfile(local) else {}
 overlay.setdefault('web', {})
 overlay['web']['port'] = $WEB_PORT
 overlay['web']['secret_key'] = '$SECRET_KEY'
 overlay['web']['host'] = '0.0.0.0'
+overlay['web'].setdefault('basic_auth', {})
+overlay['web']['basic_auth']['enabled'] = True
+overlay['web']['basic_auth']['username'] = user
+overlay['web']['basic_auth']['password_hash'] = generate_password_hash(pw)
 with open(local, 'w') as f:
     json.dump(overlay, f, indent=2)
 os.chmod(local, 0o600)
-print('Local config updated: web.port = $WEB_PORT, secret_key generated')
+print(f'Auth configured: user={user}, password hashed and stored')
 "
 
-    echo -e "${GREEN}Web interface configured on port $WEB_PORT${NC}"
-    echo -e "${GREEN}Random secret key generated${NC}"
+    echo -e "${GREEN}Web UI configured on port $WEB_PORT with authentication enabled${NC}"
     
     echo ""
     
@@ -1017,11 +956,44 @@ print('Local config updated: auto_start_cracking = ' + str($AUTO_CRACK_VALUE) + 
     DISPLAY_ENABLED="False"
     if [ "$HAS_DISPLAY" = "yes" ]; then
         DISPLAY_ENABLED="True"
-        echo -e "${GREEN}Display enabled${NC}"
+        echo -e "${GREEN}Display enabled — installing Waveshare e-Paper library...${NC}"
+
+        # Install Waveshare e-Paper library (only when display is present)
+        cd /tmp
+        rm -rf e-Paper
+        if git clone --depth 1 https://github.com/waveshare/e-Paper.git 2>&1 | grep -v "^Cloning"; then
+            if [ -d "e-Paper/RaspberryPi_JetsonNano/python" ]; then
+                cd e-Paper/RaspberryPi_JetsonNano/python
+                mkdir -p /usr/local/lib/python3/dist-packages
+                if [ -d "lib/waveshare_epd" ]; then
+                    cp -r lib/waveshare_epd /usr/local/lib/python3/dist-packages/
+                    mkdir -p /usr/local/lib/waveshare_epd
+                    cp -r lib/waveshare_epd/* /usr/local/lib/waveshare_epd/
+                    [ -f "/usr/local/lib/python3/dist-packages/waveshare_epd/__init__.py" ] \
+                        && print_success "Waveshare library copied (system-wide)" \
+                        || print_warning "Waveshare __init__.py not found — import may fail"
+                fi
+                VENV_SITE_PACKAGES=$("$INSTALL_DIR/venv/bin/python3" -c "import site; print(site.getsitepackages()[0])")
+                if [ -d "lib/waveshare_epd" ]; then
+                    cp -r lib/waveshare_epd "$VENV_SITE_PACKAGES/"
+                    [ ! -s "$VENV_SITE_PACKAGES/waveshare_epd/__init__.py" ] \
+                        && echo '# Waveshare EPD Library' > "$VENV_SITE_PACKAGES/waveshare_epd/__init__.py"
+                    [ -f "$VENV_SITE_PACKAGES/waveshare_epd/epd7in3e.py" ] \
+                        && print_success "Waveshare library installed into venv" \
+                        || print_warning "epd7in3e.py not found — display will use simulation mode"
+                fi
+                cd /tmp && rm -rf e-Paper
+            else
+                print_warning "Unexpected Waveshare repo structure — skipping"
+            fi
+        else
+            print_warning "Could not download Waveshare library — display will use simulation mode"
+        fi
+        cd "$INSTALL_DIR"
     else
         echo -e "${YELLOW}Display disabled (headless mode)${NC}"
     fi
-    
+
     # Update .local with Python
     $INSTALL_DIR/venv/bin/python3 -c "
 import json, os
@@ -1113,42 +1085,6 @@ else
     echo ""
 fi
 
-# Installation complete
-echo ""
-echo -e "${GREEN}"
-cat << "EOF"
-╔═══════════════════════════════════════════════════════════════╗
-║              Installation Completed Successfully!              ║
-╚═══════════════════════════════════════════════════════════════╝
-EOF
-echo -e "${NC}"
-
-echo -e "${BLUE}Installation Directory:${NC} $INSTALL_DIR"
-echo -e "${BLUE}Configuration File:${NC} $INSTALL_DIR/config/config.json (base, tracked)"
-echo -e "${BLUE}Local Config:${NC}       $INSTALL_DIR/config/config.json.local (your settings, gitignored)"
-echo -e "${BLUE}Database Location:${NC} $INSTALL_DIR/data/pendonn.db"
-echo ""
-echo -e "${YELLOW}Next steps:${NC}"
-echo -e "1. Set a web UI password:"
-echo -e "   ${BLUE}sudo $INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/scripts/hash-password.py${NC}"
-echo -e "   then put the hash under web.basic_auth.password_hash in config.json.local"
-echo ""
-echo -e "2. Verify allowlist (SSIDs you have permission to attack):"
-echo -e "   ${BLUE}sudo nano /opt/pendonn/config/config.json.local${NC}"
-echo -e "   shape: ${BLUE}{ \"allowlist\": { \"strict\": true, \"ssids\": [\"YourTarget1\"] } }${NC}"
-echo ""
-echo -e "3. Start (one-shot or persistent). The daemon runs preflight at boot;"
-echo -e "   if config would cause SSH lockout it refuses to start (see journalctl)."
-echo -e "      One-shot:   ${BLUE}sudo systemctl start $SERVICE_NAME $WEBUI_SERVICE_NAME $WATCHDOG_SERVICE_NAME${NC}"
-echo -e "      Persistent: ${BLUE}sudo systemctl enable --now $SERVICE_NAME $WEBUI_SERVICE_NAME $WATCHDOG_SERVICE_NAME${NC}"
-echo ""
-echo -e "View logs:    ${BLUE}sudo journalctl -u $SERVICE_NAME -f${NC}"
-echo -e "Web UI:       ${BLUE}http://<raspberry-pi-ip>:8081${NC}"
-echo ""
-echo -e "${RED}IMPORTANT:${NC} starting the daemon puts the monitor iface into monitor mode."
-echo -e "Verify your management iface is correct first — see docs/SAFETY.md."
-echo ""
-
 # Configure system to prevent WiFi driver conflicts
 print_status "Configuring WiFi driver management..."
 
@@ -1169,34 +1105,46 @@ else
     print_warning "wlan0 not found - skipping udev rules"
 fi
 
-# Configure NetworkManager to not manage external interfaces
+# Configure NetworkManager to not manage monitor/attack interfaces
+# Use MAC addresses rather than interface names — USB adapter names shuffle on reboot.
 if systemctl is-active --quiet NetworkManager; then
-    echo -e "${BLUE}Configuring NetworkManager to ignore wlan1/wlan2...${NC}"
-    
+    if [ -n "$MON_MAC" ] && [ -n "$ATK_MAC" ]; then
+        NM_UNMANAGED="mac:$MON_MAC;mac:$ATK_MAC"
+        echo -e "${BLUE}Configuring NetworkManager to ignore monitor/attack adapters (by MAC)...${NC}"
+    else
+        NM_UNMANAGED="interface-name:wlan1;interface-name:wlan2"
+        echo -e "${BLUE}Configuring NetworkManager to ignore wlan1/wlan2...${NC}"
+    fi
+
     if [ -f /etc/NetworkManager/NetworkManager.conf ]; then
         cp /etc/NetworkManager/NetworkManager.conf /etc/NetworkManager/NetworkManager.conf.backup
-        
+
         if grep -q "^\[keyfile\]" /etc/NetworkManager/NetworkManager.conf; then
-            # Add unmanaged-devices to existing [keyfile] section
             if ! grep -q "unmanaged-devices" /etc/NetworkManager/NetworkManager.conf; then
-                sed -i '/^\[keyfile\]/a unmanaged-devices=interface-name:wlan1;interface-name:wlan2' /etc/NetworkManager/NetworkManager.conf
+                sed -i "/^\[keyfile\]/a unmanaged-devices=$NM_UNMANAGED" /etc/NetworkManager/NetworkManager.conf
             fi
         else
-            # Add new [keyfile] section
-            echo "" >> /etc/NetworkManager/NetworkManager.conf
-            echo "[keyfile]" >> /etc/NetworkManager/NetworkManager.conf
-            echo "unmanaged-devices=interface-name:wlan1;interface-name:wlan2" >> /etc/NetworkManager/NetworkManager.conf
+            {
+                echo ""
+                echo "[keyfile]"
+                echo "unmanaged-devices=$NM_UNMANAGED"
+            } >> /etc/NetworkManager/NetworkManager.conf
         fi
-        print_success "NetworkManager configured"
+        print_success "NetworkManager configured (unmanaged: $NM_UNMANAGED)"
     fi
 elif [ -f /etc/dhcpcd.conf ]; then
-    echo -e "${BLUE}Configuring dhcpcd to ignore wlan1/wlan2...${NC}"
-    
-    if ! grep -q "denyinterfaces wlan1 wlan2" /etc/dhcpcd.conf; then
+    if [ -n "$MON_MAC" ] && [ -n "$ATK_MAC" ]; then
+        echo -e "${BLUE}Configuring dhcpcd to ignore monitor/attack adapters (by MAC)...${NC}"
+        DENY_DIRECTIVE="denyinterfaces $MON_MAC $ATK_MAC"
+    else
+        echo -e "${BLUE}Configuring dhcpcd to ignore wlan1/wlan2...${NC}"
+        DENY_DIRECTIVE="denyinterfaces wlan1 wlan2"
+    fi
+    if ! grep -q "$DENY_DIRECTIVE" /etc/dhcpcd.conf; then
         cp /etc/dhcpcd.conf /etc/dhcpcd.conf.backup
         echo "" >> /etc/dhcpcd.conf
         echo "# PenDonn: Don't manage pentesting interfaces" >> /etc/dhcpcd.conf
-        echo "denyinterfaces wlan1 wlan2" >> /etc/dhcpcd.conf
+        echo "$DENY_DIRECTIVE" >> /etc/dhcpcd.conf
         print_success "dhcpcd configured"
     fi
 fi
@@ -1272,23 +1220,50 @@ echo ""
 if [ "$SMOKE_FAIL" -eq 0 ]; then
     echo -e "${GREEN}Smoke test: all $SMOKE_PASS checks passed${NC}"
 else
-    echo -e "${RED}Smoke test: $SMOKE_FAIL check(s) FAILED, $SMOKE_PASS passed — fix before starting services${NC}"
+    echo -e "${RED}Smoke test: $SMOKE_FAIL check(s) FAILED, $SMOKE_PASS passed${NC}"
+    echo -e "${YELLOW}Fix the issues above before starting services.${NC}"
 fi
 echo ""
 
-echo -e "${BLUE}Checking service status...${NC}"
-sleep 2
-systemctl status pendonn --no-pager -n 10 || true
+# ── Installation complete ────────────────────────────────────────────────────
+echo -e "${GREEN}"
+cat << "EOF"
+╔═══════════════════════════════════════════════════════════════╗
+║              Installation Completed Successfully!              ║
+╚═══════════════════════════════════════════════════════════════╝
+EOF
+echo -e "${NC}"
+
+PI_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+
+echo -e "${BLUE}Installation directory:${NC} $INSTALL_DIR"
+echo -e "${BLUE}Local config (your settings):${NC} $INSTALL_DIR/config/config.json.local"
+echo -e "${BLUE}Database:${NC} $INSTALL_DIR/data/pendonn.db"
 echo ""
-echo -e "${YELLOW}Recent logs (if service started):${NC}"
-journalctl -u pendonn -n 30 --no-pager 2>/dev/null || echo "  (No logs yet - service may not have started)"
+
+echo -e "${YELLOW}Next steps:${NC}"
+echo -e "1. Verify the allowlist — SSIDs you have permission to attack:"
+echo -e "   ${BLUE}sudo nano $INSTALL_DIR/config/config.json.local${NC}"
+echo ""
+echo -e "2. Start the services (one-shot to test, or enable to persist across reboots):"
+echo -e "   One-shot:   ${BLUE}sudo systemctl start $SERVICE_NAME $WEBUI_SERVICE_NAME $WATCHDOG_SERVICE_NAME${NC}"
+echo -e "   Persistent: ${BLUE}sudo systemctl enable --now $SERVICE_NAME $WEBUI_SERVICE_NAME $WATCHDOG_SERVICE_NAME${NC}"
+echo ""
+echo -e "3. Open the web UI in your browser:"
+if [ -n "$PI_IP" ]; then
+    echo -e "   ${BLUE}http://$PI_IP:${WEB_PORT:-8081}${NC}"
+else
+    echo -e "   ${BLUE}http://<raspberry-pi-ip>:${WEB_PORT:-8081}${NC}"
+fi
 echo ""
 echo -e "${YELLOW}Useful commands:${NC}"
 echo "  • Service status:   sudo systemctl status pendonn pendonn-webui pendonn-watchdog"
 echo "  • Live logs:        sudo journalctl -u pendonn -f"
 echo "  • Errors only:      sudo journalctl -u pendonn -p err"
 echo "  • Restart daemon:   sudo systemctl restart pendonn"
-echo "  • Web UI:           http://$(hostname -I | awk '{print $1}'):8081"
 echo ""
-echo -e "${RED}REMINDER: Only use on networks you own or have permission to test!${NC}"
+echo -e "${RED}IMPORTANT:${NC} The daemon puts the monitor interface into monitor mode."
+echo -e "Verify your management interface is correct first — see docs/SAFETY.md."
+echo ""
+echo -e "${RED}REMINDER: Only use on networks you own or have written permission to test!${NC}"
 echo ""
