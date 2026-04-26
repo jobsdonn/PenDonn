@@ -4,7 +4,16 @@
 
 {% block content %}
 <div class="space-y-4">
-    <div class="flex items-center justify-end">
+    <div class="flex items-center justify-between">
+        <a href="/export/pdf"
+           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                  bg-slate-100 hover:bg-slate-200 dark:bg-ink-800 dark:hover:bg-ink-700
+                  text-slate-700 dark:text-slate-300 transition">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 10v6m0 0l-3-3m3 3l3-3M3 17a2 2 0 002 2h14a2 2 0 002-2v-5a2 2 0 00-2-2H5a2 2 0 00-2 2v5z" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Export PDF
+        </a>
         <span hx-get="/partials/scans"
               hx-target="#scans-table"
               hx-swap="outerHTML"

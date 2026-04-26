@@ -11,17 +11,19 @@ clicks even after the main confirm modal.
 """
 
 import asyncio
+import io
 import json
 import os
 import platform
 import shutil
 import subprocess
+import tempfile
 import time
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from webui.auth import require_login
 
@@ -238,6 +240,49 @@ _TABLES_TO_TRUNCATE = (
     "networks",
     "system_logs",
 )
+
+
+@router.get("/export/pdf")
+def export_pdf(
+    request: Request,
+    username: str = Depends(require_login),
+):
+    """Generate a PDF pentest report and stream it to the browser."""
+    try:
+        from core.pdf_report import PDFReport
+    except ImportError:
+        raise HTTPException(
+            status_code=503,
+            detail="PDF generation unavailable — install reportlab: pip install reportlab",
+        )
+
+    config = request.app.state.config
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    tmp.close()
+    try:
+        # Open a fresh DB connection for the report — avoids cross-thread
+        # sqlite3 issues with the shared app.state.db instance.
+        from core.database import Database
+        report_db = Database(config["database"]["path"])
+        gen = PDFReport(report_db, output_path=tmp.name)
+        gen.generate_report()
+        with open(tmp.name, "rb") as f:
+            pdf_bytes = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+    filename = f"pendonn_report_{timestamp}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/danger/reset-database")

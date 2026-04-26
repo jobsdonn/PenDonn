@@ -257,7 +257,6 @@ class PDFReport:
         cursor = conn.cursor()
         cursor.execute('SELECT severity, COUNT(*) as count FROM vulnerabilities GROUP BY severity')
         vuln_counts = {row['severity']: row['count'] for row in cursor.fetchall()}
-        conn.close()
         
         critical = vuln_counts.get('critical', 0)
         high = vuln_counts.get('high', 0)
@@ -373,7 +372,6 @@ class PDFReport:
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM handshakes')
         handshakes = [dict(row) for row in cursor.fetchall()]
-        conn.close()
         
         if not handshakes:
             self.story.append(Paragraph("No handshakes captured.", self.styles['Normal']))
