@@ -852,7 +852,7 @@ class Database:
 
             if scans_days > 0:
                 cur = conn.execute(
-                    "DELETE FROM scans WHERE started_at < datetime('now', ?)",
+                    "DELETE FROM scans WHERE start_time < datetime('now', ?)",
                     (f"-{scans_days} days",),
                 )
                 result["scans"] = cur.rowcount

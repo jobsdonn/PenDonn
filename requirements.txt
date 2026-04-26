@@ -11,7 +11,10 @@ cryptography==41.0.0
 
 # Plugin dependencies
 dnspython==2.4.2
-pysnmp==4.4.12
+# pysnmp 4.x is broken on Python 3.12+ (uses removed `imp` module). snmp_scanner
+# plugin will fail to load; all other plugins are unaffected. Tracked for future
+# migration to pysnmp-lextudio (the maintained fork).
+# pysnmp==4.4.12
 reportlab==4.0.7
 
 # Web UI (FastAPI + HTMX, port 8081)
