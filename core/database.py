@@ -58,6 +58,11 @@ class Database:
         """Initialize database schema"""
         try:
             conn = self.connect()
+            # WAL mode: allows concurrent readers + one writer across processes
+            # (daemon + webui both connect to the same file). Without WAL,
+            # a long daemon write blocks the webui entirely.
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=15000")
             cursor = conn.cursor()
             
             # Networks table - stores discovered networks

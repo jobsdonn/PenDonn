@@ -415,14 +415,19 @@ def reset_database(
         raise HTTPException(status_code=500, detail=f"backup failed: {e}")
 
     # Truncate every operator-data table, in FK order so child rows go first.
+    # Open a fresh connection with a long busy_timeout so we wait out any
+    # concurrent daemon writes rather than immediately raising "database is locked".
     try:
-        conn = db.connect()
-        cur = conn.cursor()
+        import sqlite3 as _sqlite3
+        reset_conn = _sqlite3.connect(db_path, timeout=30)
+        reset_conn.execute("PRAGMA journal_mode=WAL")
+        reset_conn.execute("PRAGMA busy_timeout=30000")
+        cur = reset_conn.cursor()
         for tbl in _TABLES_TO_TRUNCATE:
             cur.execute(f"DELETE FROM {tbl}")  # nosec — tbl is a literal allowlist
-            # Reset AUTOINCREMENT counter if sqlite_sequence row exists
             cur.execute("DELETE FROM sqlite_sequence WHERE name = ?", (tbl,))
-        conn.commit()
+        reset_conn.commit()
+        reset_conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"truncate failed: {e}")
 
