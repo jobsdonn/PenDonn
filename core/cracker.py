@@ -245,9 +245,9 @@ class PasswordCracker:
                     self.db.update_handshake_status(handshake_id, 'failed')
                     logger.warning(f"Failed to crack handshake {handshake_id}")
                 
-                # Remove from active cracks
-                del self.active_cracks[handshake_id]
-                
+                # Remove from active cracks (pop guards against race with stop())
+                self.active_cracks.pop(handshake_id, None)
+
                 self.crack_queue.task_done()
             
             except queue.Empty:
@@ -491,9 +491,11 @@ class PasswordCracker:
                 hash_file,
                 self.wordlist,
                 '-o', output_file,
-                '--force',  # Force if no GPU
-                '-D', '1',  # Device type: 1=CPU (don't use GPU on Raspberry Pi)
-                '--opencl-device-types', '1'  # CPU only
+                '--force',  # Force if no GPU available
+                # NOTE: Do NOT pass -D 1 / --opencl-device-types 1 here.
+                # On ARM (Raspberry Pi) PoCL segfaults when those flags force
+                # the JIT-compiled OpenCL device path. Removing them lets
+                # hashcat auto-select the best available backend.
             ]
             
             logger.info(f"Running Hashcat command: {' '.join(cmd)}")
