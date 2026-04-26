@@ -362,18 +362,23 @@ class NetworkEnumerator:
             
             time.sleep(5)
             
-            # Get IP address via DHCP (try dhcpcd first, then dhclient)
+            # Get IP address via DHCP.
+            # Bounce the link first — Broadcom brcmfmac drops its BPF filter
+            # after monitor→managed transitions; a down/up cycle resets it.
             logger.info(f"Requesting IP address on {interface}")
+            subprocess.run(['ip', 'link', 'set', interface, 'down'],
+                           capture_output=True, timeout=5)
+            time.sleep(0.5)
+            subprocess.run(['ip', 'link', 'set', interface, 'up'],
+                           capture_output=True, timeout=5)
+            time.sleep(1)
             dhcp_success = False
-            
-            # Check for dhcpcd (Raspberry Pi OS)
-            if subprocess.run(['which', 'dhcpcd'], capture_output=True).returncode == 0:
-                # Kill any existing dhcpcd for this interface ONLY.
-                # Same anti-pgrep-substring fix as for wpa_supplicant: walk
-                # /proc and identify per-iface dhcpcd by its argv. The
-                # system-wide dhcpcd daemon (no -i / no positional iface)
-                # is not in find_dhcpcd_pids_by_iface() output, so it can
-                # never be selected here.
+
+            _has_dhcpcd = subprocess.run(['which', 'dhcpcd'], capture_output=True).returncode == 0
+            _has_dhclient = subprocess.run(['which', 'dhclient'], capture_output=True).returncode == 0
+
+            if _has_dhcpcd:
+                # Kill any existing per-iface dhcpcd instance (not the system daemon).
                 try:
                     pids_by_iface = find_dhcpcd_pids_by_iface()
                     pids_to_kill = self._ssh_guard.assert_safe_to_kill_supplicant(
@@ -389,23 +394,24 @@ class NetworkEnumerator:
                         logger.info(f"Killed existing dhcpcd for {interface}")
                 except Exception as e:
                     logger.warning(f"Could not kill existing dhcpcd: {e}")
-                
-                # Use dhcpcd in one-shot mode to avoid interfering with management interface
-                # -n = one-shot (don't fork/daemonize)
-                # -4 = IPv4 only
-                # -w = wait for IP
+
                 logger.info(f"Running dhcpcd in one-shot mode for {interface} only")
-                result = subprocess.run(['dhcpcd', '-n', '-4', '-w', interface], 
-                                      capture_output=True, timeout=30)
+                result = subprocess.run(['dhcpcd', '-1', '-4', '-w', interface],
+                                        capture_output=True, timeout=30)
                 dhcp_success = result.returncode == 0
-            # Fallback to dhclient
-            elif subprocess.run(['which', 'dhclient'], capture_output=True).returncode == 0:
-                subprocess.run(['dhclient', '-r', interface], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                result = subprocess.run(['dhclient', interface], 
-                                      capture_output=True, timeout=30)
+                if not dhcp_success:
+                    logger.warning(f"dhcpcd failed (rc={result.returncode}), falling back to dhclient")
+
+            if not dhcp_success and _has_dhclient:
+                subprocess.run(['dhclient', '-r', interface],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+                result = subprocess.run(['dhclient', '-v', interface],
+                                        capture_output=True, timeout=30)
                 dhcp_success = result.returncode == 0
-            else:
+                if not dhcp_success:
+                    logger.warning(f"dhclient also failed (rc={result.returncode})")
+
+            if not dhcp_success and not _has_dhcpcd and not _has_dhclient:
                 error_msg = "Neither dhcpcd nor dhclient found"
                 logger.error(error_msg)
                 return (False, error_msg)
