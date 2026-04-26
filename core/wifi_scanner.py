@@ -537,6 +537,16 @@ class WiFiScanner:
                                         f"in the web UI (Settings → Scope authorization)."
                                     )
                                     self._scope_warned.add(essid)
+                                    # Record once per (run, SSID) for audit.
+                                    try:
+                                        self.db.add_audit_log(
+                                            action="attack.refused",
+                                            actor="daemon",
+                                            target=essid,
+                                            details={"reason": "scope_not_confirmed", "bssid": bssid},
+                                        )
+                                    except Exception:
+                                        pass  # audit must never break the scan loop
                             else:
                                 # Store for prioritization (handled after parsing ALL networks)
                                 self.networks[bssid]['capture_candidate'] = True

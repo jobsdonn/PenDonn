@@ -112,7 +112,8 @@ The full annotated default lives in [config/config.example.json](config/config.e
 - **Scans** — per-network nmap + plugin output, expandable
 - **Vulnerabilities** — grouped by severity
 - **Logs** — live SSE stream from journald (`pendonn` or `pendonn-webui`)
-- **Settings** — allowlist editor, strict toggle, safety status, redacted config viewer
+- **Audit** — append-only record of operator-visible actions (scope confirmations, allowlist edits, login attempts, refused attacks). Every entry tagged with actor + source IP + timestamp.
+- **Settings** — allowlist editor, strict toggle, scope authorization, safety status, redacted config viewer
 - **Captive** — mobile-friendly portal page for evil-twin engagements
 
 **CLI** (when you don't want the UI):
@@ -200,7 +201,7 @@ pendonn/
 │   ├── config.json                 # tracked defaults
 │   ├── config.example.json         # annotated reference
 │   └── config.rpi_zero2w.json      # single-radio variant
-├── tests/            # 159 unit tests, run with: python -m unittest discover tests
+├── tests/            # 168 unit tests, run with: python -m unittest discover tests
 ├── docs/
 │   ├── SAFETY.md                   # SSH lockout + plugin loader trust model
 │   └── DISPLAY_SETUP.md            # Waveshare wiring + library install
@@ -216,7 +217,7 @@ pendonn/
 python -m venv venv
 . venv/bin/activate                 # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-python -m unittest discover tests   # 159 tests, ~7s on a laptop
+python -m unittest discover tests   # 168 tests, ~7s on a laptop
 ```
 
 POSIX-only tests (e.g. `/proc` walking) are skipped on Windows. The web UI runs locally:

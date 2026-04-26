@@ -1,0 +1,96 @@
+{# Audit log table partial. Refreshed via SSE on `audit` event (any
+   new entry bumps the digest). Append-only — no edit/delete UI. #}
+
+<div id="audit-table" class="bg-white dark:bg-ink-900 border border-slate-200 dark:border-ink-700 rounded-xl overflow-hidden">
+{% if entries %}
+<div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+        <thead class="bg-slate-50 dark:bg-ink-800/60 text-left text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <tr>
+                <th class="px-4 py-3 font-medium">Time</th>
+                <th class="px-4 py-3 font-medium">Actor</th>
+                <th class="px-4 py-3 font-medium">Action</th>
+                <th class="px-4 py-3 font-medium">Target</th>
+                <th class="px-4 py-3 font-medium">Source IP</th>
+                <th class="px-4 py-3 font-medium">Details</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200 dark:divide-ink-700">
+            {% for e in entries %}
+            <tr class="hover:bg-slate-50 dark:hover:bg-ink-800/40 transition">
+                <td class="px-4 py-2 text-xs text-slate-500 dark:text-slate-400 tabular-nums whitespace-nowrap">
+                    {{ e.timestamp }}
+                </td>
+                <td class="px-4 py-2 font-medium text-xs">
+                    {% if e.actor == 'daemon' %}
+                        <span class="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                            <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                            daemon
+                        </span>
+                    {% elif e.actor %}
+                        <span class="font-mono">{{ e.actor }}</span>
+                    {% else %}
+                        <span class="text-slate-400 dark:text-slate-600 italic">—</span>
+                    {% endif %}
+                </td>
+                <td class="px-4 py-2">
+                    {% set action = e.action or '' %}
+                    {% if action.startswith('attack.refused') %}
+                        {% set tone = 'amber' %}
+                    {% elif action.startswith('login.failure') %}
+                        {% set tone = 'rose' %}
+                    {% elif action.startswith('login') %}
+                        {% set tone = 'sky' %}
+                    {% elif action.startswith('scope.confirm') %}
+                        {% set tone = 'emerald' %}
+                    {% elif action.startswith('scope.revoke') %}
+                        {% set tone = 'rose' %}
+                    {% elif action.startswith('allowlist') %}
+                        {% set tone = 'sky' %}
+                    {% else %}
+                        {% set tone = 'slate' %}
+                    {% endif %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono
+                        {% if tone == 'emerald' %}bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300
+                        {% elif tone == 'sky' %}bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300
+                        {% elif tone == 'rose' %}bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300
+                        {% elif tone == 'amber' %}bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300
+                        {% else %}bg-slate-100 text-slate-600 dark:bg-ink-800 dark:text-slate-300{% endif %}">
+                        {{ action }}
+                    </span>
+                </td>
+                <td class="px-4 py-2 text-xs">
+                    {% if e.target %}
+                        <span class="font-mono truncate inline-block max-w-[18rem]" title="{{ e.target }}">{{ e.target }}</span>
+                    {% else %}
+                        <span class="text-slate-400 dark:text-slate-600">—</span>
+                    {% endif %}
+                </td>
+                <td class="px-4 py-2 text-xs font-mono text-slate-500 dark:text-slate-400">
+                    {{ e.source_ip or '—' }}
+                </td>
+                <td class="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">
+                    {% if e.details_parsed %}
+                        <code class="text-[10px]">{{ e.details_parsed | tojson }}</code>
+                    {% else %}
+                        <span class="text-slate-400 dark:text-slate-600">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<div class="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-ink-700">
+    {{ entries|length }} entr{{ 'ies' if entries|length != 1 else 'y' }} (most recent 500)
+</div>
+{% else %}
+<div class="px-6 py-16 text-center">
+    <svg class="w-10 h-10 mx-auto text-slate-300 dark:text-ink-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <h3 class="mt-3 font-medium">No audit entries</h3>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Operator-visible actions show up here as they happen.</p>
+</div>
+{% endif %}
+</div>

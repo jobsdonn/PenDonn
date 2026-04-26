@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Audit log — PenDonn{% endblock %}
+{% block page_title %}Audit log{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+    <div class="flex items-center justify-between flex-wrap gap-3">
+        <div class="flex items-center gap-1 flex-wrap">
+            {% for key, label, _prefix in filter_groups %}
+            <a href="/audit?filter={{ key }}"
+               class="px-3 py-1.5 rounded-md text-xs font-medium transition
+                      {% if filter == key %}bg-accent-deep text-white
+                      {% else %}bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-ink-800 dark:text-slate-300 dark:hover:bg-ink-700{% endif %}">
+                {{ label }}
+            </a>
+            {% endfor %}
+        </div>
+        <span hx-get="/partials/audit?filter={{ filter }}"
+              hx-target="#audit-table"
+              hx-swap="outerHTML"
+              hx-trigger="sse:audit, every 60s"
+              class="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+            <span class="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
+            Live
+        </span>
+    </div>
+
+    {% include "partials/audit_table.html" %}
+</div>
+{% endblock %}

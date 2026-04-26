@@ -109,6 +109,10 @@ def login_page(request: Request, next: str = "/", error: Optional[str] = None):
     )
 
 
+def _client_ip(request: Request) -> Optional[str]:
+    return request.client.host if request.client else None
+
+
 @app.post("/login", include_in_schema=False)
 def login_submit(
     request: Request,
@@ -118,17 +122,36 @@ def login_submit(
 ):
     if not app.state.auth.verify_credentials(username, password):
         # Don't leak whether the username or password was wrong.
+        # Log the failed attempt for audit trail (with attempted username
+        # so brute-force attempts are visible).
+        request.app.state.db.add_audit_log(
+            action="login.failure",
+            actor=username or "(empty)",
+            source_ip=_client_ip(request),
+        )
         return RedirectResponse(
             f"/login?next={next}&error=invalid",
             status_code=status.HTTP_303_SEE_OTHER,
         )
     auth_mod.login_session(request, username)
+    request.app.state.db.add_audit_log(
+        action="login.success",
+        actor=username,
+        source_ip=_client_ip(request),
+    )
     return RedirectResponse(next or "/", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/logout", include_in_schema=False)
 def logout(request: Request):
+    # Capture the username before the session goes away.
+    user = auth_mod.current_username(request) if hasattr(auth_mod, 'current_username') else None
     auth_mod.logout_session(request)
+    request.app.state.db.add_audit_log(
+        action="login.logout",
+        actor=user,
+        source_ip=_client_ip(request),
+    )
     return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 
 

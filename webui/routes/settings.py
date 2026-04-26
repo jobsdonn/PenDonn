@@ -174,6 +174,12 @@ def allowlist_add(
     if s not in current:
         current.append(s)
         _persist_allowlist(request, current)
+        request.app.state.db.add_audit_log(
+            action="allowlist.add",
+            actor=username,
+            target=s,
+            source_ip=_client_ip(request),
+        )
     al = cfg.get("allowlist", {}) or {}
     return request.app.state.templates.TemplateResponse(
         request,
@@ -198,6 +204,12 @@ def allowlist_remove(
     if s in current:
         current.remove(s)
         _persist_allowlist(request, current)
+        request.app.state.db.add_audit_log(
+            action="allowlist.remove",
+            actor=username,
+            target=s,
+            source_ip=_client_ip(request),
+        )
     al = cfg.get("allowlist", {}) or {}
     return request.app.state.templates.TemplateResponse(
         request,
@@ -224,7 +236,16 @@ def allowlist_strict_toggle(
     new_strict = strict.lower() in ("1", "true", "on", "yes")
     cfg = request.app.state.config
     current = _current_allowlist(cfg)
+    old_strict = bool((cfg.get("allowlist", {}) or {}).get("strict", True))
     _persist_allowlist(request, current, strict=new_strict)
+    if old_strict != new_strict:
+        request.app.state.db.add_audit_log(
+            action="allowlist.strict_toggle",
+            actor=username,
+            target=("on" if new_strict else "off"),
+            details={"old": old_strict, "new": new_strict},
+            source_ip=_client_ip(request),
+        )
     return request.app.state.templates.TemplateResponse(
         request,
         "partials/allowlist.html",
@@ -270,6 +291,11 @@ def scope_partial(request: Request, username: str = Depends(require_login)):
     )
 
 
+def _client_ip(request: Request) -> Optional[str]:
+    """WebUI client IP for audit log. None if not available (test contexts)."""
+    return request.client.host if request.client else None
+
+
 @router.post("/partials/scope/confirm")
 def scope_confirm(
     request: Request,
@@ -283,10 +309,18 @@ def scope_confirm(
         return request.app.state.templates.TemplateResponse(
             request, "partials/scope.html", _scope_status(request),
         )
-    request.app.state.db.confirm_scope(
+    db = request.app.state.db
+    db.confirm_scope(
         ssids=allowlist,
         confirmed_by=username,
         note=(note or None),
+    )
+    db.add_audit_log(
+        action="scope.confirm",
+        actor=username,
+        target=",".join(allowlist),
+        details={"ssids": allowlist, "note": note or None},
+        source_ip=_client_ip(request),
     )
     return request.app.state.templates.TemplateResponse(
         request, "partials/scope.html", _scope_status(request),
@@ -295,7 +329,14 @@ def scope_confirm(
 
 @router.post("/partials/scope/revoke")
 def scope_revoke(request: Request, username: str = Depends(require_login)):
-    request.app.state.db.revoke_scope(revoked_by=username)
+    db = request.app.state.db
+    revoked = db.revoke_scope(revoked_by=username)
+    if revoked:
+        db.add_audit_log(
+            action="scope.revoke",
+            actor=username,
+            source_ip=_client_ip(request),
+        )
     return request.app.state.templates.TemplateResponse(
         request, "partials/scope.html", _scope_status(request),
     )

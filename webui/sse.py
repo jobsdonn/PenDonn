@@ -101,6 +101,15 @@ def _scope_digest(db) -> str:
     return _digest((active.get("id"), active.get("ssids"), active.get("revoked")))
 
 
+def _audit_digest(db) -> str:
+    """Audit log digest based on the latest entry's id only — append-only
+    table, so any new row bumps the id."""
+    rows = db.get_audit_log(limit=1)
+    if not rows:
+        return "empty"
+    return str(rows[0].get("id", 0))
+
+
 # Ordered map: event name -> digest function. Order is mostly for log
 # readability; the bus emits whichever changes.
 _EVENT_SOURCES: Dict[str, Callable] = {
@@ -111,6 +120,7 @@ _EVENT_SOURCES: Dict[str, Callable] = {
     "passwords": _passwords_digest,
     "vulns": _vulns_digest,
     "scope": _scope_digest,
+    "audit": _audit_digest,
 }
 
 

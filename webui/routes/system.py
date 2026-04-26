@@ -31,6 +31,60 @@ from webui.sse import event_stream
 router = APIRouter()
 
 
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+# Action prefixes the operator can filter by from the UI. The set is
+# intentionally short — adding new actions in code doesn't require a
+# UI change unless they need their own filter chip.
+_AUDIT_FILTER_GROUPS = [
+    ("all", "All", None),
+    ("scope", "Scope", "scope."),
+    ("allowlist", "Allowlist", "allowlist."),
+    ("login", "Auth", "login."),
+    ("attack.refused", "Refused attacks", "attack.refused"),
+]
+
+
+@router.get("/audit")
+def audit_page(
+    request: Request,
+    filter: str = "all",
+    username: str = Depends(require_login),
+):
+    db = request.app.state.db
+    prefix = next((p for k, _, p in _AUDIT_FILTER_GROUPS if k == filter), None)
+    entries = db.get_audit_log(action_prefix=prefix, limit=500)
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "audit.html",
+        {
+            "username": username,
+            "active_nav": "audit",
+            "entries": entries,
+            "filter": filter,
+            "filter_groups": _AUDIT_FILTER_GROUPS,
+        },
+    )
+
+
+@router.get("/partials/audit")
+def audit_partial(
+    request: Request,
+    filter: str = "all",
+    username: str = Depends(require_login),
+):
+    db = request.app.state.db
+    prefix = next((p for k, _, p in _AUDIT_FILTER_GROUPS if k == filter), None)
+    entries = db.get_audit_log(action_prefix=prefix, limit=500)
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "partials/audit_table.html",
+        {"entries": entries, "filter": filter},
+    )
+
+
 @router.get("/api/events/stream")
 async def state_event_stream(
     request: Request,

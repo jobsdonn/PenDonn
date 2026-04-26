@@ -167,6 +167,27 @@ class Database:
                 )
             ''')
 
+            # Audit log: append-only record of operator-visible actions.
+            # Captures who did what when, for compliance + post-engagement
+            # review. Distinct from system_logs (which is for the daemon's
+            # own runtime info) — audit_log is for human-attributable
+            # actions and security-relevant daemon decisions.
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    actor TEXT,
+                    action TEXT NOT NULL,
+                    target TEXT,
+                    details TEXT,
+                    source_ip TEXT
+                )
+            ''')
+            cursor.execute(
+                'CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp '
+                'ON audit_log (timestamp DESC)'
+            )
+
             conn.commit()
             # Don't close the connection - let it stay open for thread-local use
             # conn.close()
@@ -513,6 +534,84 @@ class Database:
         confirmed_set = set(active.get('ssids') or [])
         missing = [s for s in wanted if s not in confirmed_set]
         return (not missing, missing)
+
+    # ----- Audit log -----
+    #
+    # Append-only record of operator-visible actions. The intent is a
+    # single place to answer "who did what when" — covering both human
+    # actions through the WebUI and security-relevant daemon decisions.
+    # Use dotted action names: `<area>.<verb>` (e.g. `scope.confirm`,
+    # `allowlist.add`, `attack.refused`, `login.failure`).
+
+    def add_audit_log(
+        self,
+        action: str,
+        actor: Optional[str] = None,
+        target: Optional[str] = None,
+        details: Optional[Dict] = None,
+        source_ip: Optional[str] = None,
+    ) -> int:
+        """Append an audit-log entry. Best-effort — never raises into the
+        caller; an audit-log failure must not break the actual operation."""
+        try:
+            with self._lock:
+                conn = self.connect()
+                cursor = conn.cursor()
+                cursor.execute(
+                    'INSERT INTO audit_log (actor, action, target, details, source_ip) '
+                    'VALUES (?, ?, ?, ?, ?)',
+                    (actor, action, target,
+                     json.dumps(details) if details is not None else None,
+                     source_ip),
+                )
+                row_id = cursor.lastrowid
+                conn.commit()
+                return row_id
+        except Exception as e:
+            logger.warning(f"audit_log write failed (action={action}): {e}")
+            return 0
+
+    def get_audit_log(
+        self,
+        action_prefix: Optional[str] = None,
+        actor: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict]:
+        """Read recent audit log entries, newest first.
+
+        action_prefix matches dotted prefixes — e.g. 'scope.' returns
+        scope.confirm and scope.revoke; 'login' returns login.success
+        and login.failure.
+        """
+        conn = self.connect()
+        cursor = conn.cursor()
+        query = 'SELECT * FROM audit_log WHERE 1=1'
+        params: List = []
+        if action_prefix:
+            query += ' AND action LIKE ?'
+            params.append(action_prefix + '%')
+        if actor:
+            query += ' AND actor = ?'
+            params.append(actor)
+        # Order by id DESC as well as timestamp — SQLite's CURRENT_TIMESTAMP
+        # is per-second, so two events in the same second would otherwise
+        # come back in undefined order.
+        query += ' ORDER BY id DESC LIMIT ?'
+        params.append(limit)
+        cursor.execute(query, params)
+        rows = []
+        for row in cursor.fetchall():
+            d = dict(row)
+            # Parse details JSON for templates that want to render it.
+            if d.get('details'):
+                try:
+                    d['details_parsed'] = json.loads(d['details'])
+                except (TypeError, ValueError):
+                    d['details_parsed'] = None
+            else:
+                d['details_parsed'] = None
+            rows.append(d)
+        return rows
 
     # System logs
     def add_log(self, module: str, message: str, level: str = "INFO") -> int:
