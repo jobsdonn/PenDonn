@@ -60,7 +60,13 @@
     "host": "127.0.0.1",
     "port": 8080,
     "secret_key": "",
-    "_comment": "host defaults to 127.0.0.1 (loopback only). Change to 0.0.0.0 to expose on the LAN ONLY if you have authentication configured (basic_auth section, set in installer). Empty secret_key triggers ephemeral per-startup secret with a loud warning."
+    "_comment": "host defaults to 127.0.0.1 (loopback only). Wizard sets 0.0.0.0 for LAN access. Empty secret_key triggers ephemeral per-startup secret. Set password via scripts/hash-password.py and store in config.json.local.",
+    "basic_auth": {
+      "enabled": false,
+      "username": "admin",
+      "password_hash": "",
+      "_comment": "Set enabled=true and fill password_hash in config.json.local (run scripts/hash-password.py). WARNING: host=0.0.0.0 without auth exposes the UI to the whole LAN."
+    }
   },
   "display": {
     "enabled": true,

@@ -329,24 +329,26 @@ else
     fi
 
     # MediaTek MT7612U (Alfa AWUS036ACM, Panda PAU0D)
+    # MT7612U is in-tree since kernel 4.2 as mt76x2u. If the module is missing,
+    # install mt76 from morrownr's repo (the canonical out-of-tree source).
     if [[ $INSTALL_ALL == true ]] || [[ $DRIVER_CHOICE =~ 6 ]]; then
         if ! lsmod | grep -q mt76x2u; then
             echo -e "${BLUE}[6/9] Installing MT7612U driver...${NC}"
             cd /tmp
-            rm -rf mt7612u 2>/dev/null
-            if git clone --depth 1 https://github.com/aircrack-ng/rtl8812au.git mt7612u; then
-                cd mt7612u
-                if make -j$(nproc) && make install; then
-                    print_success "MT7612U driver installed"
+            rm -rf mt76 2>/dev/null
+            if git clone --depth 1 https://github.com/morrownr/mt76.git mt76; then
+                cd mt76
+                if make -j$(nproc) && make install && modprobe mt76x2u 2>/dev/null; then
+                    print_success "MT7612U (mt76x2u) driver installed"
                 else
                     print_warning "MT7612U driver compilation failed (non-critical)"
                 fi
-                cd /tmp && rm -rf mt7612u
+                cd /tmp && rm -rf mt76
             else
-                print_warning "Failed to download MT7612U driver"
+                print_warning "Failed to download MT7612U driver (non-critical)"
             fi
         else
-            echo -e "${GREEN}[6/9] MT7612U driver already present${NC}"
+            echo -e "${GREEN}[6/9] MT7612U driver already present (mt76x2u)${NC}"
         fi
     fi
 
@@ -1227,8 +1229,8 @@ $INSTALL_DIR/venv/bin/python3 -c "import sys; assert sys.version_info >= (3,9)" 
 # Config loads without error
 $INSTALL_DIR/venv/bin/python3 -c "
 import sys; sys.path.insert(0, '$INSTALL_DIR')
-from core.config_loader import load
-c = load('$INSTALL_DIR/config/config.json')
+from core.config_loader import load_config
+c = load_config('$INSTALL_DIR/config/config.json')
 assert c.get('system', {}).get('name') == 'PenDonn', 'name mismatch'
 " 2>/dev/null && _smoke_ok "config_loader OK" || _smoke_err "config_loader failed — check config.json / config.json.local syntax"
 
