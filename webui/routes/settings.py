@@ -93,6 +93,8 @@ def settings_page(request: Request, username: str = Depends(require_login)):
     ctx.update(_notifications_status(request))
     # Cracking partial.
     ctx.update(_cracking_status(cfg))
+    # WiFi/scan partial.
+    ctx.update(_wifi_status(cfg))
     return request.app.state.templates.TemplateResponse(
         request, "settings.html", ctx,
     )
@@ -668,4 +670,80 @@ def cracking_save(
     ctx["saved"] = True
     return request.app.state.templates.TemplateResponse(
         request, "partials/cracking.html", ctx,
+    )
+
+
+# ---------------------------------------------------------------------------
+# WiFi / scan settings (scan window, channel hop interval)
+# ---------------------------------------------------------------------------
+
+
+def _wifi_status(config: Dict[str, Any]) -> Dict[str, Any]:
+    w = config.get("wifi", {}) or {}
+    return {
+        "wifi_scan_window": int(w.get("scan_window_seconds", 30)),
+        "wifi_channel_hop": int(w.get("channel_hop_interval", 2)),
+    }
+
+
+def _persist_wifi(request: Request, scan_window: int, channel_hop: int) -> None:
+    overlay_path = local_overlay_path(request.app.state.config_path)
+    overlay: Dict[str, Any] = {}
+    if os.path.isfile(overlay_path):
+        try:
+            with open(overlay_path, "r", encoding="utf-8") as f:
+                overlay = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            overlay = {}
+    w = overlay.setdefault("wifi", {})
+    w["scan_window_seconds"] = scan_window
+    w["channel_hop_interval"] = channel_hop
+    _atomic_write_local(overlay_path, overlay)
+
+    live_w = request.app.state.config.setdefault("wifi", {})
+    live_w["scan_window_seconds"] = scan_window
+    live_w["channel_hop_interval"] = channel_hop
+
+
+@router.get("/partials/wifi")
+def wifi_partial(request: Request, username: str = Depends(require_login)):
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "partials/wifi.html",
+        _wifi_status(request.app.state.config),
+    )
+
+
+@router.post("/partials/wifi/save")
+def wifi_save(
+    request: Request,
+    scan_window_seconds: int = Form(30),
+    channel_hop_interval: int = Form(2),
+    username: str = Depends(require_login),
+):
+    if not 10 <= scan_window_seconds <= 120:
+        raise HTTPException(
+            status_code=400, detail="scan_window_seconds must be 10-120"
+        )
+    if not 1 <= channel_hop_interval <= 10:
+        raise HTTPException(
+            status_code=400, detail="channel_hop_interval must be 1-10"
+        )
+
+    _persist_wifi(request, scan_window_seconds, channel_hop_interval)
+
+    request.app.state.db.add_audit_log(
+        action="wifi.update",
+        actor=username,
+        details={
+            "scan_window_seconds": scan_window_seconds,
+            "channel_hop_interval": channel_hop_interval,
+        },
+        source_ip=_client_ip(request),
+    )
+
+    ctx = _wifi_status(request.app.state.config)
+    ctx["saved"] = True
+    return request.app.state.templates.TemplateResponse(
+        request, "partials/wifi.html", ctx,
     )

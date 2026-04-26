@@ -700,6 +700,42 @@ class TestSettingsPage(unittest.TestCase):
         # Partial content present inline
         self.assertIn("Engine order", r.text)
 
+    def test_wifi_partial_renders(self):
+        r = self.client.get("/partials/wifi")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("scan_window_seconds", r.text)
+        self.assertIn("channel_hop_interval", r.text)
+
+    def test_wifi_save_persists(self):
+        r = self.client.post("/partials/wifi/save", data={
+            "scan_window_seconds": "45",
+            "channel_hop_interval": "3",
+        })
+        self.assertEqual(r.status_code, 200)
+        cfg = self.app.state.config
+        self.assertEqual(cfg["wifi"]["scan_window_seconds"], 45)
+        self.assertEqual(cfg["wifi"]["channel_hop_interval"], 3)
+
+    def test_wifi_save_rejects_out_of_range_window(self):
+        r = self.client.post("/partials/wifi/save", data={
+            "scan_window_seconds": "5",
+            "channel_hop_interval": "2",
+        })
+        self.assertEqual(r.status_code, 400)
+
+    def test_wifi_save_rejects_bad_hop(self):
+        r = self.client.post("/partials/wifi/save", data={
+            "scan_window_seconds": "30",
+            "channel_hop_interval": "99",
+        })
+        self.assertEqual(r.status_code, 400)
+
+    def test_wifi_section_on_settings_page(self):
+        r = self.client.get("/settings")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("WiFi scan", r.text)
+        self.assertIn("Scan window", r.text)
+
 
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi not installed")
 class TestPluginsPage(unittest.TestCase):

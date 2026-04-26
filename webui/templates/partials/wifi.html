@@ -1,0 +1,67 @@
+{# WiFi / scan settings — scan window duration and channel hop interval.
+   Both are live-readable by wifi_scanner via config; daemon restart needed
+   for them to take effect since the scanner reads them at thread start. #}
+
+<div id="wifi-settings" class="space-y-5">
+
+    {% if saved %}
+    <div class="rounded-md border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-200">
+        Saved — daemon picks up new settings on next restart.
+    </div>
+    {% endif %}
+
+    <form hx-post="/partials/wifi/save"
+          hx-target="#wifi-settings"
+          hx-swap="outerHTML"
+          class="space-y-5">
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+
+            {# ---- scan window ---- #}
+            <div>
+                <label class="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Scan window
+                    <span class="text-xs text-slate-400 font-normal">(seconds)</span>
+                </label>
+                <input type="number" name="scan_window_seconds"
+                       min="10" max="120"
+                       value="{{ wifi_scan_window }}"
+                       class="mt-1 w-24 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm">
+                <p class="text-[11px] text-slate-500 dark:text-slate-500 mt-1">
+                    How long airodump-ng runs each pass before the scanner processes
+                    results. Longer = more APs seen on congested 5 GHz channels but
+                    slower reaction to new networks. 30 s is a good default for most
+                    urban environments. Range: 10–120.
+                </p>
+            </div>
+
+            {# ---- channel hop interval ---- #}
+            <div>
+                <label class="block text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Channel hop interval
+                    <span class="text-xs text-slate-400 font-normal">(seconds)</span>
+                </label>
+                <input type="number" name="channel_hop_interval"
+                       min="1" max="10"
+                       value="{{ wifi_channel_hop }}"
+                       class="mt-1 w-24 rounded-md border-slate-300 dark:border-ink-600 dark:bg-ink-800 dark:text-slate-100 focus:border-accent focus:ring-accent text-sm">
+                <p class="text-[11px] text-slate-500 dark:text-slate-500 mt-1">
+                    Time spent on each channel before moving. Shorter hops = better
+                    coverage but lower per-channel dwell (may miss slower beacons).
+                    2 s is a balanced default for 2.4 GHz. Range: 1–10.
+                </p>
+            </div>
+
+        </div>
+
+        <div class="flex items-center gap-2 pt-1">
+            <button type="submit"
+                    class="px-3 py-1.5 rounded-md bg-accent-deep text-white text-sm font-medium hover:bg-sky-600">
+                Save
+            </button>
+            <span class="text-[11px] text-slate-500 dark:text-slate-500 ml-auto">
+                Daemon picks up changes on next restart.
+            </span>
+        </div>
+    </form>
+</div>
