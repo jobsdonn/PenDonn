@@ -529,20 +529,19 @@ pip install -r requirements.txt
 print_success "Python dependencies installed"
 
 # Download rockyou wordlist
-print_status "Downloading rockyou.txt wordlist (140MB, may take a while)..."
-mkdir -p /usr/share/wordlists
+print_status "Checking rockyou.txt (140 MB)..."
+mkdir -p /usr/share/wordlists "$INSTALL_DIR/wordlists"
 if [ ! -f /usr/share/wordlists/rockyou.txt ]; then
     if wget --progress=bar:force https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt \
             -O /usr/share/wordlists/rockyou.txt 2>/dev/null; then
-        print_success "Rockyou wordlist downloaded"
+        print_success "rockyou.txt downloaded"
     else
         rm -f /usr/share/wordlists/rockyou.txt
-        print_warning "Rockyou download failed (network issue or URL changed)."
-        print_warning "Install manually later: wget <url> -O /usr/share/wordlists/rockyou.txt"
-        print_warning "Cracking will work once rockyou.txt is in place."
+        print_warning "rockyou download failed — add manually later."
+        print_warning "  wget <url> -O /usr/share/wordlists/rockyou.txt"
     fi
 else
-    print_success "Rockyou wordlist already exists"
+    print_success "rockyou.txt already present"
 fi
 
 # Set up systemd service for main daemon
@@ -988,9 +987,87 @@ with open(local, 'w') as f:
 os.chmod(local, 0o600)
 print('Local config updated: auto_start_cracking = ' + str($AUTO_CRACK_VALUE))
 "
-    
+
     echo ""
-    
+    echo -e "${BLUE}  Additional wordlists${NC}"
+    echo -e "  Primary: /usr/share/wordlists/rockyou.txt"
+    echo ""
+    _EXTRA_WL=()
+
+    read -p "  Download WPA-probable top-4800 (~50 KB, WiFi-specific)? [y/N] " _yn
+    if [[ "${_yn,,}" == "y" ]]; then
+        _f="$INSTALL_DIR/wordlists/wpa-probable-top4800.txt"
+        if wget -q "https://raw.githubusercontent.com/berzerk0/Probable-Wordlists/master/Real-Passwords/WPA-Probables/probable-v2-wpa-top4800.txt" \
+                -O "$_f" 2>/dev/null; then
+            print_success "WPA probable → $_f"
+            _EXTRA_WL+=("$_f")
+        else
+            rm -f "$_f"; print_warning "Download failed"
+        fi
+    fi
+
+    read -p "  Download top-100 000 common passwords (~1 MB)? [y/N] " _yn
+    if [[ "${_yn,,}" == "y" ]]; then
+        _f="$INSTALL_DIR/wordlists/top-100k.txt"
+        if wget -q "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/10-million-password-list-top-100000.txt" \
+                -O "$_f" 2>/dev/null; then
+            print_success "Top 100k → $_f"
+            _EXTRA_WL+=("$_f")
+        else
+            rm -f "$_f"; print_warning "Download failed"
+        fi
+    fi
+
+    read -p "  Download top-1 000 000 common passwords (~10 MB)? [y/N] " _yn
+    if [[ "${_yn,,}" == "y" ]]; then
+        _f="$INSTALL_DIR/wordlists/top-1m.txt"
+        if wget -q "https://raw.githubusercontent.com/danielmiessler/SecLists/master/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt" \
+                -O "$_f" 2>/dev/null; then
+            print_success "Top 1M → $_f"
+            _EXTRA_WL+=("$_f")
+        else
+            rm -f "$_f"; print_warning "Download failed"
+        fi
+    fi
+
+    read -p "  Create a test wordlist (enter specific known passwords)? [y/N] " _yn
+    if [[ "${_yn,,}" == "y" ]]; then
+        _f="$INSTALL_DIR/wordlists/test.txt"
+        echo "  Enter passwords one per line — empty line to finish:"
+        : > "$_f"
+        while IFS= read -r -p "    Password: " _pw; do
+            [[ -z "$_pw" ]] && break
+            echo "$_pw" >> "$_f"
+        done
+        _n=$(wc -l < "$_f")
+        if [[ $_n -gt 0 ]]; then
+            print_success "Test wordlist: $_n password(s) → $_f"
+            _EXTRA_WL+=("$_f")
+        else
+            rm -f "$_f"
+        fi
+    fi
+
+    # Write extra_wordlists to config.json.local
+    printf '%s\n' "${_EXTRA_WL[@]}" > /tmp/pendonn_extra_wl.txt
+    $INSTALL_DIR/venv/bin/python3 -c "
+import json, os
+local = '$LOCAL_FILE'
+overlay = json.load(open(local)) if os.path.isfile(local) else {}
+overlay.setdefault('cracking', {})
+with open('/tmp/pendonn_extra_wl.txt') as f:
+    extra = [l.strip() for l in f if l.strip()]
+overlay['cracking']['extra_wordlists'] = extra
+with open(local, 'w') as f:
+    json.dump(overlay, f, indent=2)
+os.chmod(local, 0o600)
+if extra:
+    print(f'Extra wordlists saved to config: {len(extra)} list(s)')
+"
+    rm -f /tmp/pendonn_extra_wl.txt
+
+    echo ""
+
     # Display Configuration
     echo -e "${BLUE}[5/5] Display Configuration${NC}"
     read -p "Do you have a Waveshare display connected? (yes/no) [no]: " HAS_DISPLAY
