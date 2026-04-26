@@ -213,6 +213,9 @@ class NetworkEnumerator:
                 logger.error(f"Failed to connect to {ssid}: {error_msg}")
                 results['phases']['connection'] = {'status': 'failed', 'error': error_msg}
                 self.db.update_scan(scan_id, 'failed', results, 0)
+                # Always release the scanner lock — _connect_to_network() set it
+                # but _disconnect_from_network() won't be called on this path.
+                self._disconnect_from_network()
                 return
             
             results['phases']['connection'] = {'status': 'success'}
@@ -299,10 +302,21 @@ class NetworkEnumerator:
             error_results['error'] = str(e)
             error_results['error_type'] = type(e).__name__
             self.db.update_scan(scan_id, 'failed', error_results, 0)
-        
+            # Ensure scanner is unblocked even on unexpected exceptions.
+            self._disconnect_from_network()
+
         finally:
             if scan_id in self.active_scans:
                 del self.active_scans[scan_id]
+            # Hard safety net: if enumeration_active is still True at this point
+            # (e.g. due to a bug in _disconnect_from_network itself), force-clear it
+            # so the scan loop is never permanently stuck.
+            if self.wifi_scanner and getattr(self.wifi_scanner, 'enumeration_active', False):
+                logger.warning("enumeration_active still set after enumeration — force-clearing")
+                try:
+                    self.wifi_scanner.resume_from_enumeration()
+                except Exception:
+                    pass
     
     def _connect_to_network(self, ssid: str, password: str) -> tuple:
         """Connect to target network using enumeration interface (wlan2)
