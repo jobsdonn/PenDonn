@@ -26,8 +26,35 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 from webui.auth import require_login
+from webui.sse import event_stream
 
 router = APIRouter()
+
+
+@router.get("/api/events/stream")
+async def state_event_stream(
+    request: Request,
+    username: str = Depends(require_login),
+):
+    """Single SSE stream that fires named events when DB state changes.
+
+    Events emitted (one per logical view):
+      - stats, scans, handshakes, networks, passwords, vulns, scope
+
+    Each event's `data` is just a digest hash; the UI listens for the
+    event name and re-fetches the corresponding partial. Replaces the
+    per-page HTMX `every Xs` polling that used to reset interactive
+    state (open accordions, expanded rows) on every tick.
+    """
+    db = request.app.state.db
+    return StreamingResponse(
+        event_stream(request, db),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

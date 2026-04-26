@@ -17,10 +17,10 @@
         <span hx-get="/partials/scans"
               hx-target="#scans-table"
               hx-swap="outerHTML"
-              hx-trigger="every 10s [!document.querySelector('#scans-table [data-expanded]')]"
+              hx-trigger="sse:scans [!document.querySelector('#scans-table [data-expanded]')], every 60s [!document.querySelector('#scans-table [data-expanded]')]"
               class="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
             <span class="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
-            Live (10s)
+            Live
         </span>
     </div>
 

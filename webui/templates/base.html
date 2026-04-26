@@ -56,6 +56,11 @@
 
     <!-- HTMX for server-driven interactivity (no SPA bundle needed). -->
     <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+    <!-- HTMX SSE extension drives the live-update event bus. The server
+         emits named events (stats/scans/handshakes/...) when DB state
+         actually changes, and partials use `hx-trigger="sse:<name>"`
+         instead of `every Xs`. Eliminates the polling-resets-state bug. -->
+    <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/sse.js" defer></script>
     <!-- Alpine for tiny client-side state (dropdowns, modals, theme). -->
     <script src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
 
@@ -76,6 +81,7 @@
 </head>
 <body x-data="{ dark: document.documentElement.classList.contains('dark') }"
       x-effect="document.documentElement.classList.toggle('dark', dark)"
+      {% if username %}hx-ext="sse" sse-connect="/api/events/stream"{% endif %}
       class="h-full bg-slate-50 text-slate-900 dark:bg-ink-950 dark:text-slate-100 font-sans antialiased">
 
 {% if username %}

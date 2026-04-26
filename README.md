@@ -200,7 +200,7 @@ pendonn/
 │   ├── config.json                 # tracked defaults
 │   ├── config.example.json         # annotated reference
 │   └── config.rpi_zero2w.json      # single-radio variant
-├── tests/            # 152 unit tests, run with: python -m unittest discover tests
+├── tests/            # 159 unit tests, run with: python -m unittest discover tests
 ├── docs/
 │   ├── SAFETY.md                   # SSH lockout + plugin loader trust model
 │   └── DISPLAY_SETUP.md            # Waveshare wiring + library install
@@ -216,7 +216,7 @@ pendonn/
 python -m venv venv
 . venv/bin/activate                 # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-python -m unittest discover tests   # 152 tests, ~7s on a laptop
+python -m unittest discover tests   # 159 tests, ~7s on a laptop
 ```
 
 POSIX-only tests (e.g. `/proc` walking) are skipped on Windows. The web UI runs locally:

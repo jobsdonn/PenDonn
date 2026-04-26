@@ -30,10 +30,11 @@
     </div>
     {% endif %}
 
-    {# KPI tiles. Polled by HTMX every 5s; only this fragment repaints. #}
+    {# KPI tiles. Refresh on SSE 'stats' event (server-side change detection)
+       with a 60s polling fallback in case the SSE stream is broken. #}
     <div id="stats"
          hx-get="/partials/stats"
-         hx-trigger="every 5s"
+         hx-trigger="sse:stats, every 60s"
          hx-swap="innerHTML">
         {% include "partials/stats.html" %}
     </div>

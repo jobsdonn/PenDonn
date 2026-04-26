@@ -31,10 +31,10 @@
             <span hx-get="/partials/networks?q={{ q }}&sort={{ sort }}&order={{ order }}&only={{ only }}"
                   hx-target="#networks-table"
                   hx-swap="outerHTML"
-                  hx-trigger="every 10s"
+                  hx-trigger="sse:networks, every 60s"
                   class="inline-flex items-center gap-1">
                 <span class="w-1.5 h-1.5 rounded-full bg-ok animate-pulse"></span>
-                Live (10s)
+                Live
             </span>
         </div>
     </div>
