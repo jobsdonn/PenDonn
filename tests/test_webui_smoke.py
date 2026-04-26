@@ -349,13 +349,13 @@ class TestScansAndVulnsPages(unittest.TestCase):
         cls.scan_id = db.add_scan(net_id, "Lab1", "full")
         import json as _json
         db.update_scan(cls.scan_id, "completed",
-                       {"hosts": [
+                       {"phases": {"port_scan": {"results": [
                            {"ip": "10.0.0.1", "hostname": "router.lab", "ports": [
                                {"port": 22, "service": "ssh"},
                                {"port": 80, "service": "http"},
                            ]},
                            {"ip": "10.0.0.5", "ports": [{"port": 445, "service": "smb"}]},
-                       ]}, 3)
+                       ]}}}, 3)
         db.add_vulnerability(cls.scan_id, "10.0.0.1", 22, "ssh",
                              "Weak SSH algorithms", "high",
                              "ssh-rsa accepted", "ssh_scanner")

@@ -1,6 +1,8 @@
 <div class="space-y-4">
     {% if scan.results_parsed %}
-        {% set hosts = scan.results_parsed.get('hosts', []) if scan.results_parsed is mapping else [] %}
+        {% set phases = scan.results_parsed.get('phases', {}) if scan.results_parsed is mapping else {} %}
+        {% set ps = phases.get('port_scan', {}) if phases is mapping else {} %}
+        {% set hosts = ps.get('results', []) if ps is mapping else [] %}
         {% if hosts %}
         <div>
             <h4 class="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Hosts ({{ hosts|length }})</h4>
@@ -59,7 +61,7 @@
     </div>
     {% endif %}
 
-    {% if not scan.results_parsed and not vulns %}
+    {% if not hosts and not vulns %}
     <div class="text-xs text-slate-500 dark:text-slate-400 italic">No results recorded yet.</div>
     {% endif %}
 </div>
