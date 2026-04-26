@@ -93,4 +93,15 @@ EOF
 
 systemctl daemon-reload
 systemctl enable pendonn pendonn-webui pendonn-watchdog pendonn-uvmon
+
+# Plugin manager refuses to load plugins owned by non-root or with
+# group-writable permissions (security gate against tamper). rsync from
+# the dev box preserves uid 1000 / mode 0664, so re-apply both each
+# deploy. Without this the daemon load-fails 7+ plugins after every
+# rsync.
+if [ -d "${INSTALL_DIR}/plugins" ]; then
+    chown -R root:root "${INSTALL_DIR}/plugins"
+    chmod -R g-w,o-w "${INSTALL_DIR}/plugins"
+fi
+
 echo "Units written and enabled."
